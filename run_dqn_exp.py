@@ -24,7 +24,6 @@ from four_room.constants import train_config, val_config, test_config, size
 from rnd_exploration.dataset import State, Transition
 from dqn_experiments.regression_exp_utils import run_experiment
 from dqn.model import DQN
-from line_profiler import profile
 
 gym.register('MiniGrid-FourRooms-v1', FourRoomsEnv)
 
@@ -50,7 +49,6 @@ def compute_mc(rewards: list, gamma: float = 0.99):
         returns.insert(0, G)  
     return returns
 
-@profile
 def train_dqn_rnd(
     args: Args, 
     batch_size: int = 512, 
@@ -71,7 +69,7 @@ def train_dqn_rnd(
     """
     rms = RunningAverage(window_size=window)
     mse_loss = nn.MSELoss()
-    os.makedirs('dqn_results', exist_ok=True)
+    os.makedirs('results/dqn_exps', exist_ok=True)
     imgs = deque(maxlen=2500)
     learning_curves = []
     scores = []

@@ -50,7 +50,7 @@ def train_basic_rnd(
     """
     """
     rms = RunningAverage(window_size=window)
-    os.makedirs('dqn_results', exist_ok=True)
+    os.makedirs('results/dqn_exps', exist_ok=True)
     imgs = deque(maxlen=2500)
     learning_curves = []
     scores = []
