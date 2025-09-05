@@ -64,7 +64,7 @@ DIR_TO_VEC = [
 with open('configs/train.pl', 'rb') as file:
     train_config = dill.load(file)
 
-with open('configs/test_reachable.pl', 'rb') as file:
+with open('configs/test_unreachable.pl', 'rb') as file:
     test_config = dill.load(file)
 
 with open('configs/validation_unreachable.pl', 'rb') as file:
