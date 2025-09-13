@@ -12,6 +12,7 @@ from copy import deepcopy
 from dataclasses import dataclass
 from tqdm import tqdm
 from collections import deque
+from line_profiler import profile
 
 from rnd_exploration.rnd import RNDNetwork
 from four_room.env import FourRoomsEnv
@@ -49,6 +50,7 @@ def compute_mc(rewards: list, gamma: float = 0.99):
         returns.insert(0, G)  
     return returns
 
+@profile
 def train_dqn_rnd(
     args: Args, 
     batch_size: int = 512, 
@@ -267,7 +269,7 @@ def train_dqn_rnd(
             
         
         if step % rnd_steps == 0:
-            rnd_batch_size = min(batch_size*(rnd_steps-1), 25)
+            rnd_batch_size = batch_size*min((rnd_steps-1), 25)
             batch_rnd, _, _, _, _, _ = agent.buffer.sample(batch_size=rnd_batch_size)
             batch_rnd = torch.cat([batch_rnd, batch_obs, rnd_seen_obs], dim=0)
             rnd_net.observe(batch_rnd)
@@ -286,7 +288,7 @@ def train_dqn_rnd(
                 'uniqueness': uniqueness, 
                 'images': imgs, 
             } 
-            with open(f'results/dqn_exps/{args.dir}_seed_{args.seed}_{step}.pl', 'wb') as file:
+            with open(f'results/dqn_exps/{args.dir}_seed_{args.seed}_intermediate.pl', 'wb') as file:
                 dill.dump(results, file)
         
         uniqueness.append(agent.buffer.ratio_unique_trans)

@@ -89,22 +89,21 @@ class RNDNetwork:
             actions = self.sanitize(actions)
             
         preds = self.rnd_net(states, actions)
-        targets = self.target_net(states, actions)
+        with torch.no_grad():
+            targets = self.target_net(states, actions)
         loss = self.loss(preds, targets.detach()).mean()
         
         self.optimizer.zero_grad()
         loss.backward()
         self.optimizer.step()
         
-    
+    @torch.no_grad()
     def get_error(self, state: Tensor, action: Tensor = None) -> float:
         states = self.sanitize(state)
         if self.use_actions: 
             action = self.sanitize(action)
-            
-        with torch.no_grad():
-            return self.scale * self.loss(self.rnd_net(states, action), 
-                                          self.target_net(states, action)).sum(dim=-1)
+
+        return self.loss(self.rnd_net(states, action), self.target_net(states, action)).sum(dim=-1)
         
     
     def sanitize(self, tensor: Tensor) -> Tensor:

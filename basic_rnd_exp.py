@@ -12,6 +12,7 @@ from copy import deepcopy
 from dataclasses import dataclass
 from tqdm import tqdm
 from collections import deque
+from line_profiler import profile
 
 from rnd_exploration.rnd import RNDNetwork
 from four_room.env import FourRoomsEnv
@@ -22,6 +23,7 @@ from four_room.constants import train_config, val_config, test_config, size, sta
 from rnd_exploration.utils import RunningAverage
 from dqn_experiments.regression_exp_utils import run_experiment
 from rnd_exploration.dataset import ReplayBuffer, State
+
 
 gym.register('MiniGrid-FourRooms-v1', FourRoomsEnv)
 
@@ -35,6 +37,7 @@ class Args:
     capacity: int = int(1e5)
     device: str = 'cuda'
 
+@profile
 def train_basic_rnd(
     args: Args, 
     batch_size: int = 512, 
@@ -187,7 +190,7 @@ def train_basic_rnd(
             current_context = env.unwrapped.context
             
         if step % rnd_steps  == 0: 
-            rnd_batch_size = min(batch_size*(rnd_steps), 25)
+            rnd_batch_size = batch_size*min(rnd_steps, 25)
             batch_rnd, _, _, _, _, _ = buffer.sample(batch_size=rnd_batch_size)
             batch_rnd = torch.cat([batch_rnd, rnd_seen_obs], dim=0)
             rnd_net.observe(batch_rnd)
@@ -205,7 +208,7 @@ def train_basic_rnd(
                 'images': imgs, 
             } 
             
-            with open(f'results/dqn_exps/{args.dir}_seed_{args.seed}_{step}.pl', 'wb') as file:
+            with open(f'results/dqn_exps/{args.dir}_seed_{args.seed}_intermediate.pl', 'wb') as file:
                 dill.dump(results, file)
         
         uniqueness.append(buffer.ratio_unique_trans)
@@ -231,8 +234,8 @@ if __name__ == '__main__':
     parser.add_argument('-s', '--replaysize', type=int, default=int(1e5), help='size of replay buffer')
     parser.add_argument('-seed', '--seed', type=int, default=0, help='seed')
     parser.add_argument('-b', '--batch_size', type=int, default=512, help='batch size')
-    parser.add_argument('--window', type=int, default=250, help='window size of rms')
-    parser.add_argument('--rndsteps', type=int, default=25, help='when to update rnd')
+    parser.add_argument('--window', type=int, default=5000, help='window size of rms')
+    parser.add_argument('--rndsteps', type=int, default=5, help='when to update rnd')
     parser.add_argument('-fr', '--freq', type=int, default=int(1e5), help='freq of regression')
     
     args = parser.parse_args()
