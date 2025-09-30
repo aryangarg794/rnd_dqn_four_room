@@ -103,7 +103,7 @@ class RNDNetwork:
         if self.use_actions: 
             action = self.sanitize(action)
 
-        return self.loss(self.rnd_net(states, action), self.target_net(states, action)).sum(dim=-1)
+        return self.loss(self.rnd_net(states, action), self.target_net(states, action)).sum(dim=-1).detach()
         
     
     def sanitize(self, tensor: Tensor) -> Tensor:

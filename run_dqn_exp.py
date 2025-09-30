@@ -69,7 +69,8 @@ def train_dqn_rnd(
 ): 
     """
     """
-    rms = RunningAverage(window_size=window)
+    rms_dqn = RunningAverage(window_size=window)
+    rms_rnd = RunningAverage(window_size=window)
     mse_loss = nn.MSELoss()
     os.makedirs('results/dqn_exps', exist_ok=True)
     imgs = deque(maxlen=2500)
@@ -121,6 +122,8 @@ def train_dqn_rnd(
     
     ep_highlight_mask = np.zeros((len(train_config['agent positions']), 
                                         env.get_wrapper_attr('width'), env.get_wrapper_attr('height')), dtype=bool)
+    heatmap_swap = np.zeros((len(train_config['agent positions']), 
+                                        env.get_wrapper_attr('width'), env.get_wrapper_attr('height')), dtype=int)
     ep_colors = np.empty_like(ep_highlight_mask, dtype=object)
     
     current_context = env.unwrapped.context
@@ -132,8 +135,9 @@ def train_dqn_rnd(
     rewards = []
     traj_in = []
     switches = 0 
-    trajs_added = 0 
-    rnd_seen_obs = torch.empty((rnd_steps, *args.env.observation_space.shape)).to(device=args.device)
+    trajs_added = 0
+    rnd_step = 0 
+    rnd_seen_obs = torch.zeros((rnd_steps, *args.env.observation_space.shape)).to(device=args.device)
     
     for step in (pbar := tqdm(range(1, num_timesteps+1), disable=debug)): 
         
@@ -152,7 +156,9 @@ def train_dqn_rnd(
         with torch.no_grad():
             goal_action = state_to_q[State(obs)].argmax()
             dqn_val = agent(obs_torch).squeeze()[goal_action].item()
-        
+            rnd_val = rnd_net.get_error(obs).item()
+            
+        rms_rnd.update(rnd_val)
         obs_prime, reward, terminated, truncated, _ = env.step(action)
         done = terminated or truncated
         
@@ -184,15 +190,18 @@ def train_dqn_rnd(
                     ep_colors[to_remove[0], to_remove[1], to_remove[2]] = None
             
             # rnd_net.observe(obs)
-            rnd_seen_obs[step % rnd_steps] = obs_torch
+            rnd_seen_obs[rnd_step] = obs_torch
             items_added += 1
-        elif dqn_val - rms.avg >= alpha * rms.std or (np.array_equal(agent_pos_after, aux_pos) \
-            or np.array_equal(agent_pos, aux_pos)) and not record: # swap to record mode 
+            rnd_step = (rnd_step + 1) % rnd_steps
             
+        elif dqn_val - rms_dqn.avg >= alpha * rms_dqn.std and not record: # swap to record mode 
             record = True
             target_pos = goal_pos
-            if debug and dqn_val - rms.avg >= alpha * rms.std:
-                switches += 1 
+            heatmap_swap[current_context, agent_pos_after[0], agent_pos_after[1]] += 1
+            switches += 1
+                 
+        elif (np.array_equal(agent_pos_after, aux_pos) or np.array_equal(agent_pos, aux_pos)) and not record: 
+            target_pos = goal_pos
         
         if render and step >= num_timesteps - 1000:
             env.get_wrapper_attr('set_aux')(aux_pos) # cannot add beforehand or else included in obs
@@ -203,7 +212,7 @@ def train_dqn_rnd(
             env.get_wrapper_attr('remove_aux')(aux_pos)
             
         obs = obs_prime
-        rms.update(dqn_val)
+        rms_dqn.update(dqn_val)
         
         if done:
             if render:
@@ -240,7 +249,7 @@ def train_dqn_rnd(
                 print(f"======Step:{step}========")
                 print(f"Items added: {items_added}")
                 print(f"Uniqueness: {agent.buffer.ratio_unique_trans:.4f}")
-                print(f"Avg {rms.avg:.4f} | STD {rms.std:.4f}")
+                print(f"Avg {rms_dqn.avg:.4f} | STD {rms_dqn.std:.4f}")
                 print(f"DQN Vals: {dqn_vals}")
                 print(f"MC Vals: {mc_vals}")
                 print(f"Traj Uniqueness: {traj_in}")
@@ -256,6 +265,7 @@ def train_dqn_rnd(
         
             with torch.no_grad():
                 batch_rewards = rnd_net.get_error(batch_obs).detach().unsqueeze(dim=-1)
+                batch_rewards = (batch_rewards - rms_rnd.avg) / rms_rnd.std
                 target_vals = agent.target_net(batch_primes).gather(dim=1, index=batch_next_actions)
                 targets = batch_rewards + gamma * target_vals * (1 - batch_dones)
                 
@@ -273,7 +283,7 @@ def train_dqn_rnd(
             batch_rnd, _, _, _, _, _ = agent.buffer.sample(batch_size=rnd_batch_size)
             batch_rnd = torch.cat([batch_rnd, batch_obs, rnd_seen_obs], dim=0)
             rnd_net.observe(batch_rnd)
-            rnd_seen_obs = torch.empty((rnd_steps, *args.env.observation_space.shape)).to(device=args.device)
+            rnd_seen_obs = torch.zeros((rnd_steps, *args.env.observation_space.shape)).to(device=args.device)
             
         agent.soft_update()
         
@@ -287,13 +297,15 @@ def train_dqn_rnd(
                 'reg_test_scores' : scores,
                 'uniqueness': uniqueness, 
                 'images': imgs, 
+                'heatmap': heatmap_swap
             } 
             with open(f'results/dqn_exps/{args.dir}_seed_{args.seed}_intermediate.pl', 'wb') as file:
                 dill.dump(results, file)
         
         uniqueness.append(agent.buffer.ratio_unique_trans)
-        # pbar.set_description(f"Training RND DQN | Uniqueness: {agent.buffer.ratio_unique_trans:.4f} | Regression Exp: {(scores[-1] if len(scores) > 0 else 0):.4f} | Items added: {items_added} | Context: {current_context} | RND Val: {dqn_val:.4f} | Avg: {rms.avg:.4f} | STD: {rms.std:.4f}")
-        pbar.set_description(f"Training RND DQN | Uniqueness: {agent.buffer.ratio_unique_trans:.4f} | Regression Exp: {(scores[-1] if len(scores) > 0 else 0):.4f} | Items added: {items_added} | Context: {current_context}")
+        value = (dqn_val - rms_dqn.avg)/rms_dqn.std  
+        pbar.set_description(f"Training RND DQN | Uniqueness: {agent.buffer.ratio_unique_trans:.4f} | Last Regression Exp: {(scores[-1] if len(scores) > 0 else 0):.4f} | Total Items added: {items_added} | Current Context: {current_context} | RND Val: {dqn_val:.4f} | Avg: {rms_dqn.avg:.4f} | STD: {rms_dqn.std:.4f} | Switches: {switches} | Value: {value:.4f}")
+        # pbar.set_description(f"Training RND DQN | Uniqueness: {agent.buffer.ratio_unique_trans:.4f} | Regression Exp: {(scores[-1] if len(scores) > 0 else 0):.4f} | Items added: {items_added} | Context: {current_context}")
     
     return {
         'lc_curves': learning_curves, 
@@ -317,7 +329,7 @@ if __name__ == '__main__':
     parser.add_argument('-seed', '--seed', type=int, default=0, help='seed')
     parser.add_argument('-b', '--batch_size', type=int, default=512, help='batch size')
     parser.add_argument('-fr', '--freq', type=int, default=int(1e5), help='freq of regression')
-    parser.add_argument('--window', type=int, default=5000, help='window size of rms')
+    parser.add_argument('--window', type=int, default=2500, help='window size of rms_dqn')
     parser.add_argument('--rndsteps', type=int, default=10, help='when to update rnd')
     parser.add_argument('-tau', '--tau', type=float, default=0.005, help='tau')
     parser.add_argument('--debug', action='store_true', help='debug mode')

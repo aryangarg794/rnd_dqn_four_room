@@ -12,7 +12,7 @@ from copy import deepcopy
 from dataclasses import dataclass
 from tqdm import tqdm
 from collections import deque
-from line_profiler import profile
+# from line_profiler import profile
 
 from rnd_exploration.rnd import RNDNetwork
 from four_room.env import FourRoomsEnv
@@ -37,7 +37,6 @@ class Args:
     capacity: int = int(1e5)
     device: str = 'cuda'
 
-@profile
 def train_basic_rnd(
     args: Args, 
     batch_size: int = 512, 
@@ -52,7 +51,8 @@ def train_basic_rnd(
 ): 
     """
     """
-    rms = RunningAverage(window_size=window)
+    print(f"Running Basic Training with alpha: {alpha} and batch: {batch_size}")
+    rms_val = RunningAverage(window_size=window)
     os.makedirs('results/dqn_exps', exist_ok=True)
     imgs = deque(maxlen=2500)
     learning_curves = []
@@ -100,12 +100,18 @@ def train_basic_rnd(
     
     ep_highlight_mask = np.zeros((len(train_config['agent positions']), 
                                         env.get_wrapper_attr('width'), env.get_wrapper_attr('height')), dtype=bool)
+    
+    heatmap_swap = np.zeros((len(train_config['agent positions']), 
+                                        env.get_wrapper_attr('width'), env.get_wrapper_attr('height')))
+    
     ep_colors = np.empty_like(ep_highlight_mask, dtype=object)
     
     current_context = env.unwrapped.context
     past_pos = []
     visit_history = deque(maxlen=args.capacity+1)
-    rnd_seen_obs = torch.empty((rnd_steps, *args.env.observation_space.shape)).to(device=args.device)
+    rnd_seen_obs = torch.zeros((rnd_steps, *args.env.observation_space.shape)).to(device=args.device)
+    switches = 0
+    rnd_step = 0
     
     for step in (pbar := tqdm(range(1, num_timesteps+1))): 
         obs_torch = torch.from_numpy(obs).to(device=args.device).unsqueeze(dim=0)
@@ -141,14 +147,19 @@ def train_basic_rnd(
                     ep_colors[to_remove[0], to_remove[1], to_remove[2]] = None
                     
             # rnd_net.observe(obs)
-            rnd_seen_obs[step % rnd_steps] = obs_torch
+            rnd_seen_obs[rnd_step] = obs_torch
             items_added += 1
+            rnd_step = (rnd_step+1) % rnd_steps
 
-        elif rnd_val - rms.avg >= alpha * rms.std or (np.array_equal(agent_pos_after, aux_pos) \
-            or np.array_equal(agent_pos, aux_pos)) and not record: # swap to record mode 
+        elif rnd_val - rms_val.avg >= alpha * rms_val.std and not record: # swap to record mode 
+            switches += 1 
+            heatmap_swap[current_context, agent_pos_after[0], agent_pos_after[1]] += 1
             record = True
             target_pos = goal_pos
-            
+        
+        elif (np.array_equal(agent_pos_after, aux_pos) or np.array_equal(agent_pos, aux_pos)) and not record:
+            target_pos = goal_pos
+                    
         if render and step >= num_timesteps - 1000:
             env.get_wrapper_attr('set_aux')(aux_pos) # cannot add beforehand or else included in obs
             agent_col = (255, 0, 0) if np.array_equal(target_pos, goal_pos) else (0, 0, 255) 
@@ -158,7 +169,7 @@ def train_basic_rnd(
             env.get_wrapper_attr('remove_aux')(aux_pos)
             
         obs = obs_prime
-        rms.update(rnd_val)
+        rms_val.update(rnd_val)
         
         if done:
             if render:
@@ -194,7 +205,7 @@ def train_basic_rnd(
             batch_rnd, _, _, _, _, _ = buffer.sample(batch_size=rnd_batch_size)
             batch_rnd = torch.cat([batch_rnd, rnd_seen_obs], dim=0)
             rnd_net.observe(batch_rnd)
-            rnd_seen_obs = torch.empty((rnd_steps, *args.env.observation_space.shape)).to(device=args.device)
+            rnd_seen_obs = torch.zeros((rnd_steps, *args.env.observation_space.shape)).to(device=args.device)
             
         if step % regression_freq == 0 and buffer.size >= buffer.capacity:
             lc, test_score = run_experiment(buffer, device=args.device)
@@ -206,14 +217,16 @@ def train_basic_rnd(
                 'reg_test_scores' : scores,
                 'uniqueness': uniqueness, 
                 'images': imgs, 
+                'heatmap': heatmap_swap
             } 
             
             with open(f'results/dqn_exps/{args.dir}_seed_{args.seed}_intermediate.pl', 'wb') as file:
                 dill.dump(results, file)
         
         uniqueness.append(buffer.ratio_unique_trans)
-        # pbar.set_description(f"Training RND DQN | Uniqueness: {buffer.ratio_unique_trans:.4f} | Last Regression Exp: {(scores[-1] if len(scores) > 0 else 0):.4f} | Total Items added: {items_added} | Current Context: {current_context} | RND Val: {rnd_val:.4f} | Avg: {rms.avg:.4f} | STD: {rms.std:.4f}")
-        pbar.set_description(f"Training RND DQN | Uniqueness: {buffer.ratio_unique_trans:.4f} | Regression Exp: {(scores[-1] if len(scores) > 0 else 0):.4f} | Items added: {items_added} | Context: {current_context}")
+        value = (rnd_val - rms_val.avg)/rms_val.std  
+        pbar.set_description(f"Training RND DQN | Uniqueness: {buffer.ratio_unique_trans:.4f} | Last Regression Exp: {(scores[-1] if len(scores) > 0 else 0):.4f} | Total Items added: {items_added} | Current Context: {current_context} | RND Val: {rnd_val:.4f} | Avg: {rms_val.avg:.4f} | STD: {rms_val.std:.4f} | Switches: {switches} | Value: {value:.4f}")
+        # pbar.set_description(f"Training RND DQN | Uniqueness: {buffer.ratio_unique_trans:.4f} | Regression Exp: {(scores[-1] if len(scores) > 0 else 0):.4f} | Items added: {items_added} | Context: {current_context} | Switches: {switches}")
             
     return {
         'lc_curves': learning_curves, 
@@ -234,8 +247,8 @@ if __name__ == '__main__':
     parser.add_argument('-s', '--replaysize', type=int, default=int(1e5), help='size of replay buffer')
     parser.add_argument('-seed', '--seed', type=int, default=0, help='seed')
     parser.add_argument('-b', '--batch_size', type=int, default=512, help='batch size')
-    parser.add_argument('--window', type=int, default=5000, help='window size of rms')
-    parser.add_argument('--rndsteps', type=int, default=5, help='when to update rnd')
+    parser.add_argument('--window', type=int, default=2500, help='window size of rms_val')
+    parser.add_argument('--rndsteps', type=int, default=10, help='when to update rnd')
     parser.add_argument('-fr', '--freq', type=int, default=int(1e5), help='freq of regression')
     
     args = parser.parse_args()

@@ -20,13 +20,13 @@ class RunningAverage:
 
     @property
     def avg(self):
-        if len(self.values) > 0 :
+        if len(self.values) > 0:
             return float(np.mean(self.values))
         return 0.0
     
     @property
     def std(self):
-        if len(self.values) > 0 :
+        if len(self.values) > 1:
             return float(np.std(self.values))
         return 1.0
 
