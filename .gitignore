@@ -170,3 +170,5 @@ wandb
 containers
 results/dqn_exps
 /txts
+
+**.lprof

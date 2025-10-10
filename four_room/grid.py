@@ -192,7 +192,7 @@ class Grid:
         
         # Highlight the cell if needed
         if highlight:
-            color = (*color, 0.5)
+            color = (*color, 0.5) if len(color) < 4 else color
             fill_coords(img, point_in_rect(0, 1, 0, 1), color)
 
         if obj is not None:

@@ -114,12 +114,6 @@ class RNDNetwork:
         return tensor
         
         
-        
-        
-        
-        
-        
-        
 if __name__ == "__main__":
     gym.register('MiniGrid-FourRooms-v1', FourRoomsEnv)
     size = 19
