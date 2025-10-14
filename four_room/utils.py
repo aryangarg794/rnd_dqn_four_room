@@ -75,7 +75,7 @@ def obs_to_state(obs):
 
         walls = uncentered_obs[2]
         doors_pos = (*(np.where(walls[:, room_size+1] == 0)[0] - np.array([1, room_size+2])), *(np.where(walls[room_size+1, :] == 0)[0] - np.array([1, room_size+2])))
-
+        
         return (*player_loc, player_dir, *goal_loc, *doors_pos)
     else:
         assert False, f"Obs not correct shape: {obs.shape}"

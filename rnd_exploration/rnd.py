@@ -20,12 +20,17 @@ class BaseNetwork(nn.Module):
         outdim: int = 1024, 
         feature_units: int = 2048, 
         hidden_layers: list = list([2048, 2048, 1024, 1024, 1024]), 
+        use_cnn: bool = True,
         *args, 
         **kwargs
     ) -> None:
         super().__init__(*args, **kwargs)
         
-        self.cnn = CNN(obs_space, features_dim=feature_units)
+        if use_cnn:
+            self.initial = CNN(obs_space, features_dim=feature_units)
+        else:
+            dim = np.prod(obs_space.shape)
+            self.initial = nn.Linear(dim, feature_units)
         
         self.net = nn.Sequential()
         if use_action:
@@ -43,7 +48,7 @@ class BaseNetwork(nn.Module):
         self.net.apply(orthogonal_layer_init)
         
     def forward(self, state: Tensor, action: Tensor = None) -> Tensor:
-        features = self.cnn(state)
+        features = self.initial(state)
         if self.use_action: 
             inp = torch.cat([features, action], dim=-1)
         else:
@@ -60,6 +65,7 @@ class RNDNetwork:
         scale: float = 1, 
         lr: float = 1e-5,
         device: str = 'cpu',
+        use_cnn: bool = True,
         *args, 
         **kwargs
     ) -> None:
@@ -70,11 +76,17 @@ class RNDNetwork:
             env.observation_space, 
             env.action_space,
             hidden_layers=[128],
+            use_cnn=use_cnn
         ).to(device)
-        self.rnd_net = BaseNetwork(use_actions, env.observation_space, env.action_space).to(device)
+        self.rnd_net = BaseNetwork(use_actions, env.observation_space, env.action_space, use_cnn=use_cnn).to(device)
         
         for param in self.target_net.parameters():
             param.requires_grad = False
+            param.data = param.data * 10
+            
+        with torch.no_grad():
+            for param in self.rnd_net.parameters():
+                param.data = param.data * 10
         
         self.optimizer = torch.optim.Adam(self.rnd_net.parameters(), lr=lr)
         self.device = device
@@ -109,7 +121,7 @@ class RNDNetwork:
     def sanitize(self, tensor: Tensor) -> Tensor:
         if not isinstance(tensor, Tensor):
             tensor = torch.as_tensor(tensor, device=self.device) 
-        if len(tensor.shape) < 4:  # wont work for non-image inputs !!
+        if tensor.size(0) != 1: 
             tensor = tensor.unsqueeze(dim=0)
         return tensor
         

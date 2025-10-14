@@ -25,7 +25,6 @@ from four_room.constants import train_config, val_config, test_config, size
 from rnd_exploration.dataset import State, Transition
 from dqn_experiments.regression_exp_utils import run_experiment
 from dqn.model import DQN
-from dqn.counter import CountBasedUncertainty
 
 gym.register('MiniGrid-FourRooms-v1', FourRoomsEnv)
 
@@ -39,11 +38,20 @@ class Args:
     use_cnn: bool = True
     capacity: int = int(1e5)
     tau: float = 0.005
+    lr_rnd: float = 1e-5
     use_actions: bool = False
     device: str = 'cuda'
 
+def compute_mc(rewards: list, gamma: float = 0.99):
+    returns = []
+    G = 0
+    for reward in reversed(rewards):
+        G = reward + gamma * G
+        returns.insert(0, G)  
+    return returns
+
 @profile
-def train_dqn_count(
+def train_dqn_rnd(
     args: Args, 
     batch_size: int = 512, 
     gamma: float = 0.99, 
@@ -53,15 +61,16 @@ def train_dqn_count(
     seed: int = 0,
     alpha: float = 1.5, 
     window: int = 10000, 
-    warmupsteps: int = 4000,
     update_freq: int = 1, 
+    warmupsteps: int = 4000,
     render: bool = False,
     debug: bool = False,
+    rnd_steps: int = 10
 ): 
     """
     """
     rms_dqn = RunningAverage(window_size=window)
-    rms_un = RunningAverage(window_size=window)
+    rms_rnd = RunningAverage(window_size=window)
     mse_loss = nn.MSELoss()
     os.makedirs('results/dqn_exps', exist_ok=True)
     imgs = deque(maxlen=2500)
@@ -87,8 +96,13 @@ def train_dqn_count(
         use_cnn=args.use_cnn
     )
     
-    counter = CountBasedUncertainty(capacity=args.capacity)
-
+    rnd_net = RNDNetwork(
+        env=args.env, 
+        lr=args.lr_rnd,
+        device=args.device,
+        use_cnn=False
+    )
+    
     env = deepcopy(args.env)
     items_added = 0
     
@@ -118,12 +132,18 @@ def train_dqn_count(
     visit_history = deque(maxlen=args.capacity+1)
     placeholder = np.array([1.0, 0.0, 0.0])
     
+    dqn_vals = []
+    rewards = []
+    traj_in = []
     switches = 0 
     trajs_added = 0
+    rnd_step = 0 
+    rnd_seen_obs = torch.zeros((rnd_steps, np.prod(args.env.observation_space.shape))).to(device=args.device)
     
     for step in (pbar := tqdm(range(1, num_timesteps+1), disable=debug)): 
         
-        obs_torch = torch.from_numpy(obs).to(device=args.device).unsqueeze(dim=0)
+        obs_torch = torch.tensor(obs, dtype=torch.float32, device=args.device).unsqueeze(dim=0)
+        rnd_obs = obs_torch.flatten().unsqueeze(dim=0)
         state = obs_to_state(obs)
     
         agent_pos = env.get_wrapper_attr('agent_pos')
@@ -138,11 +158,9 @@ def train_dqn_count(
         with torch.no_grad():
             goal_action = state_to_q[State(obs)].argmax()
             dqn_val = agent(obs_torch).squeeze()[goal_action].item()
-            obj_tuple = tuple([int(item) for item in state])
-            counter.add(obj_tuple)
-            uncertainty = counter[obj_tuple]
+            rnd_val = rnd_net.get_error(rnd_obs).item()
             
-        rms_un.update(uncertainty)
+        rms_rnd.update(rnd_val)
         obs_prime, reward, terminated, truncated, _ = env.step(action)
         done = terminated or truncated
         
@@ -150,6 +168,14 @@ def train_dqn_count(
         
         if step < warmupsteps or record:
             assert np.array_equal(target_pos, goal_pos) 
+            
+            if debug:
+                reward_rnd = rnd_net.get_error(rnd_obs)
+                rewards.append(reward_rnd.item())
+                dqn_vals.append(dqn_val)
+                traj_in.append(
+                    agent.buffer.unique_trans.has(Transition(obs, q))
+                )
             
             q_next = state_to_q[State(state=obs_prime)] if not done else placeholder
             next_action = q_next.argmax()
@@ -165,7 +191,10 @@ def train_dqn_count(
                     ep_highlight_mask[to_remove[0], to_remove[1], to_remove[2]] = False
                     ep_colors[to_remove[0], to_remove[1], to_remove[2]] = None
             
+            # rnd_net.observe(obs)
+            rnd_seen_obs[rnd_step] = rnd_obs
             items_added += 1
+            rnd_step = (rnd_step + 1) % rnd_steps
             
         elif dqn_val - rms_dqn.avg >= alpha * rms_dqn.std and not record: # swap to record mode 
             record = True
@@ -217,12 +246,28 @@ def train_dqn_count(
             current_context = env.unwrapped.context
             trajs_added += 1
             
+            if debug: 
+                mc_vals = compute_mc(rewards, gamma=gamma)
+                print(f"======Step:{step}========")
+                print(f"Items added: {items_added}")
+                print(f"Uniqueness: {agent.buffer.ratio_unique_trans:.4f}")
+                print(f"Avg {rms_dqn.avg:.4f} | STD {rms_dqn.std:.4f}")
+                print(f"DQN Vals: {dqn_vals}")
+                print(f"MC Vals: {mc_vals}")
+                print(f"Traj Uniqueness: {traj_in}")
+                print(f"Switches: {switches}")
+                print(f"Trajs Added: {trajs_added}")
+            
+            rewards = []
+            dqn_vals = []
+            traj_in = []
+            
         if step % update_freq == 0: 
-            batch_rewards, ind = counter.sample(batch_size=batch_size)
-            batch_obs, batch_actions, _, batch_primes, batch_next_actions, batch_dones = agent.buffer.sample_index(ind)
-        
+            batch_obs, batch_actions, _, batch_primes, batch_next_actions, batch_dones = agent.buffer.sample(batch_size=batch_size)
+            
             with torch.no_grad():
-                batch_rewards = batch_rewards.detach()
+                batch_rewards = rnd_net.get_error(batch_obs.flatten(start_dim=1)).detach().unsqueeze(dim=-1)
+                batch_rewards = (batch_rewards - rms_rnd.avg) / rms_rnd.std
                 target_vals = agent.target_net(batch_primes).gather(dim=1, index=batch_next_actions)
                 targets = batch_rewards + gamma * target_vals * (1 - batch_dones)
                 
@@ -233,6 +278,14 @@ def train_dqn_count(
             loss.backward()
             grad_norm = torch.nn.utils.clip_grad_norm_(agent.net.parameters(), grad_norm)
             agent.optimizer.step()
+            
+        
+        if step % rnd_steps == 0:
+            rnd_batch_size = batch_size*min((rnd_steps-1), 25)
+            batch_rnd, _, _, _, _, _ = agent.buffer.sample(batch_size=rnd_batch_size)
+            batch_rnd = torch.cat([batch_rnd.flatten(start_dim=1), batch_obs.flatten(start_dim=1), rnd_seen_obs], dim=0)
+            rnd_net.observe(batch_rnd)
+            rnd_seen_obs = torch.zeros((rnd_steps, np.prod(args.env.observation_space.shape))).to(device=args.device)
             
         agent.soft_update()
         
@@ -254,14 +307,13 @@ def train_dqn_count(
         uniqueness.append(agent.buffer.ratio_unique_trans)
         value = (dqn_val - rms_dqn.avg)/rms_dqn.std  
         pbar.set_description(f"Training RND DQN | Uniqueness: {agent.buffer.ratio_unique_trans:.4f} | Last Regression Exp: {(scores[-1] if len(scores) > 0 else 0):.4f} | Total Items added: {items_added} | Current Context: {current_context} | RND Val: {dqn_val:.4f} | Avg: {rms_dqn.avg:.4f} | STD: {rms_dqn.std:.4f} | Switches: {switches} | Value: {value:.4f}")
-        # pbar.set_description(f"Training RND Count | Uniqueness: {agent.buffer.ratio_unique_trans:.4f} | Regression Exp: {(scores[-1] if len(scores) > 0 else 0):.4f} | Items added: {items_added} | Context: {current_context}")
+        # pbar.set_description(f"Training RND DQN | Uniqueness: {agent.buffer.ratio_unique_trans:.4f} | Regression Exp: {(scores[-1] if len(scores) > 0 else 0):.4f} | Items added: {items_added} | Context: {current_context}")
     
     return {
         'lc_curves': learning_curves, 
         'reg_test_scores' : scores,
         'uniqueness': uniqueness, 
         'images': imgs, 
-        'heatmap': heatmap_swap
     } 
     
 if __name__ == '__main__':
@@ -269,9 +321,10 @@ if __name__ == '__main__':
     
     parser = argparse.ArgumentParser()
     parser.add_argument('-t', '--timesteps', type=int, default=int(5e5), help='timesteps')
-    parser.add_argument('-f', '--dir', type=str, default='rnd_count', help='save name')
+    parser.add_argument('-f', '--dir', type=str, default='rnd_dqn', help='save name')
     parser.add_argument('-a', '--alpha', type=float, default=1.0, help='alpha')
-    parser.add_argument('-ag', '--lr_agent', type=float, default=1e-3, help='lr for dqn agent')
+    parser.add_argument('-rnd', '--lr_rnd', type=float, default=1e-5, help='lr for rnd')
+    parser.add_argument('-ag', '--lr_agent', type=float, default=1e-4, help='lr for dqn agent')
     parser.add_argument('-d', '--device', type=str, default='cuda', help='device')
     parser.add_argument('-r', '--render', action='store_true', help='render mode')
     parser.add_argument('-s', '--replaysize', type=int, default=int(1e5), help='size of replay buffer')
@@ -279,6 +332,7 @@ if __name__ == '__main__':
     parser.add_argument('-b', '--batch_size', type=int, default=512, help='batch size')
     parser.add_argument('-fr', '--freq', type=int, default=int(1e5), help='freq of regression')
     parser.add_argument('--window', type=int, default=2500, help='window size of rms_dqn')
+    parser.add_argument('--rndsteps', type=int, default=10, help='when to update rnd')
     parser.add_argument('-tau', '--tau', type=float, default=0.005, help='tau')
     parser.add_argument('--debug', action='store_true', help='debug mode')
     
@@ -328,10 +382,11 @@ if __name__ == '__main__':
        device=args.device,
        capacity=args.replaysize, 
        tau=args.tau,
+       lr_rnd=args.lr_rnd,
     )
     
     
-    results = train_dqn_count(
+    results = train_dqn_rnd(
         args=aux_args,
         batch_size=args.batch_size,
         num_timesteps=args.timesteps,
@@ -341,6 +396,7 @@ if __name__ == '__main__':
         render=args.render,
         debug=args.debug,
         window=args.window,
+        rnd_steps=args.rndsteps
     )
     
     with open(f'results/dqn_exps/{args.dir}_seed_{args.seed}_{args.timesteps}.pl', 'wb') as file:

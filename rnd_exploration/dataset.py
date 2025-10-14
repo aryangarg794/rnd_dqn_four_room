@@ -1,5 +1,7 @@
 import numpy as np
 import torch
+
+from torch import Tensor
 from hashlib import sha1
 from collections import defaultdict, deque, OrderedDict
 
@@ -246,6 +248,17 @@ class ReplayBuffer:
         
     def sample(self, batch_size: int = 256):
         ind = torch.randint(0, self.size, device=self.device, size=(batch_size,))
+        batch_torch = (
+            self.states[ind], 
+            self.actions[ind], 
+            self.rewards[ind],
+            self.next_states[ind], 
+            self.next_actions[ind],
+            self.dones[ind]
+        )
+        return batch_torch
+    
+    def sample_index(self, ind: Tensor):
         batch_torch = (
             self.states[ind], 
             self.actions[ind], 
