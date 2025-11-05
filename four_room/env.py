@@ -214,6 +214,9 @@ class FourRoomsEnv(MiniGridEnv):
     def set_aux(self, aux_pos):
         aux = AuxGoal()
         self.put_obj(aux, *aux_pos)
+        
+    def context_info(self, idx):
+        return self._agent_pos_list[idx], self._doors_pos_list[idx], self._goal_pos_list[idx]
     
     def remove_aux(self, aux_pos):
         self.grid.set(aux_pos[0], aux_pos[1], None)

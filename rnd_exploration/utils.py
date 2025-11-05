@@ -27,7 +27,8 @@ class RunningAverage:
     @property
     def std(self):
         if len(self.values) > 1:
-            return float(np.std(self.values))
+            std = float(np.std(self.values))
+            return std if std > 0 else 1.0
         return 1.0
 
     def reset(self):

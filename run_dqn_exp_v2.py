@@ -314,6 +314,7 @@ def train_dqn_rnd(
         'reg_test_scores' : scores,
         'uniqueness': uniqueness, 
         'images': imgs, 
+        'heatmap': heatmap_swap
     } 
     
 if __name__ == '__main__':

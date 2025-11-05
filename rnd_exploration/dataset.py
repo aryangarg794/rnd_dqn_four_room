@@ -216,6 +216,7 @@ class ReplayBuffer:
         
         self.trans = deque(maxlen=self.capacity)
         self.unique_trans = MovingSet(capacity=capacity)
+        self.obs = MovingSet(capacity=capacity)
 
     def update(
         self, 
@@ -271,6 +272,14 @@ class ReplayBuffer:
         
     def __len__(self):
         return self.size
+
+    def update_seen(self, obj: tuple): 
+        self.obs.add(obj)
+    
+    def has(self, obj: tuple):
+        if self.obs.has(obj):
+            return True
+        return False
     
     @property
     def ratio_unique_trans(self):
