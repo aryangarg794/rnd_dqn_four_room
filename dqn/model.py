@@ -105,7 +105,7 @@ class DQN:
         with torch.no_grad():
             for param, target_param in zip(self.net.parameters(), self.target_net.parameters()):
                 target_param.data.copy_(self.tau * param.data + (1-self.tau) * target_param.data)
-            
+           
     def eval(self, num_runs: int = 10, seed: int = 0):
         self.net.eval()
         rewards = []
@@ -130,7 +130,7 @@ class DQN:
         self.net.train()
         return np.mean(rewards)
     
-    def __call__(self, state: torch.Tensor, *args, **kwds):
+    def __call__(self, state: torch.Tensor):
         return self.net(state)
     
     # only need this for testing

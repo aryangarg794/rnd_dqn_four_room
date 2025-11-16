@@ -22,7 +22,7 @@ from four_room.constants import train_config, val_config, test_config, size, sta
 from rnd_exploration.utils import RunningAverage
 from dqn_experiments.regression_exp_utils import run_experiment
 from rnd_exploration.dataset import ReplayBuffer, State
-from dqn.counter import CountBasedUncertainty
+from dqn.counter import CountBasedUncertainty, MovingCountBasedUncertainty
 
 gym.register('MiniGrid-FourRooms-v1', FourRoomsEnv)
 
@@ -46,8 +46,9 @@ def train_basic_count(
     seed: int = 0,
     alpha: float = 1.5, 
     window: int = 250, 
-    warmupsteps: int = 7000,
+    warmupsteps: int = 0,
     render: bool = False,
+    moving_buffer: bool = True, 
 ): 
     """
     """
@@ -73,8 +74,9 @@ def train_basic_count(
         capacity=args.capacity,
         device=args.device
     )
-    
-    counter = CountBasedUncertainty(capacity=args.capacity)
+
+    counter_moving = MovingCountBasedUncertainty(capacity=args.capacity)
+    counter_full = CountBasedUncertainty(capacity=args.capacity)
     
     env = deepcopy(args.env)
     items_added = 0
@@ -88,7 +90,8 @@ def train_basic_count(
     max_k = len(env.get_wrapper_attr('valid_pos'))
     k = np.random.randint(low=0, high=max_k)
     aux_pos = env.get_wrapper_attr('valid_pos')[k]
-    env.get_wrapper_attr('move_valid_pos')(k)
+    if warmupsteps > 0:
+        env.get_wrapper_attr('move_valid_pos')(k)
     
     paths = find_all_shortest_paths(state[:2], state[2], aux_pos, state[5:], size)
     path_index = np.random.randint(low=0, high=len(paths))
@@ -102,17 +105,19 @@ def train_basic_count(
     
     aux_heatmap = np.zeros_like(heatmap_swap)
     explore_heatmap = np.zeros_like(heatmap_swap)
+    switch_state_history = []
     
     ep_colors = np.empty_like(ep_highlight_mask, dtype=object)
     
-    current_context = env.unwrapped.context
+    current_context = env.get_wrapper_attr('context')
     past_pos = []
     visit_history = deque(maxlen=args.capacity+1)
     switches = 0
+    contexts = []
     
     for step in (pbar := tqdm(range(1, num_timesteps+1))): 
         state = obs_to_state(obs)
-    
+        contexts.append(current_context)
         agent_pos = env.get_wrapper_attr('agent_pos')
         
         if np.array_equal(target_pos, aux_pos) and not np.array_equal(agent_pos, aux_pos):
@@ -121,14 +126,21 @@ def train_basic_count(
             state_obj = State(state=obs)
             q = state_to_q[state_obj]
             action = q.argmax() if isinstance(q, np.ndarray) else np.array(q).argmax()
+
         
-        obj_tuple = tuple([int(item) for item in state])
         obs_prime, reward, terminated, truncated, _ = env.step(action)
         done = terminated or truncated
         
-        uncertainty = counter[obj_tuple]
+        obj_tuple = tuple([int(item) for item in state])
+        obj_moving_tuple = (current_context, *agent_pos)
+        if moving_buffer:
+            uncertainty = counter_moving[*obj_moving_tuple]
+        else:
+            uncertainty = counter_full[obj_tuple]    
+        
         agent_pos_after = env.get_wrapper_attr('agent_pos')
-        explore_heatmap[current_context, agent_pos[0], agent_pos[1]] += 1
+        if not record:
+            explore_heatmap[current_context, agent_pos[0], agent_pos[1]] += 1
         
         if buffer.has(obj_tuple):
             rms_val.update(uncertainty) # rms of the stuff we have already seen 
@@ -147,18 +159,20 @@ def train_basic_count(
                     ep_highlight_mask[to_remove[0], to_remove[1], to_remove[2]] = False
                     ep_colors[to_remove[0], to_remove[1], to_remove[2]] = None
                     
-            counter.add(obj_tuple)
+            counter_moving.add(obj_moving_tuple, step)
+            counter_full.add(obj_tuple, current_context)
             buffer.update_seen(obj_tuple)
             items_added += 1
             
         # elif uncertainty - rms_val.avg >= alpha * rms_val.std and not record: # swap to record mode
-        elif uncertainty >= 0.9 and not record: 
-            print('switched')
+        elif uncertainty >= 1.1 and not record: 
             switches += 1 
             heatmap_swap[current_context, agent_pos[0], agent_pos[1]] += 1
             record = True
             target_pos = goal_pos
+            switch_state_history.append((step, current_context, *agent_pos))
             
+            # add the state that was used for the switch
             buffer.update(obs, action, reward, obs_prime, 0, int(done), q_value=q)
             if render: 
                 ep_colors[current_context, agent_pos[0], agent_pos[1]] = (0, 0, 255)
@@ -171,7 +185,8 @@ def train_basic_count(
                     ep_highlight_mask[to_remove[0], to_remove[1], to_remove[2]] = False
                     ep_colors[to_remove[0], to_remove[1], to_remove[2]] = None
                     
-            counter.add(obj_tuple)
+            counter_moving.add(obj_moving_tuple, step)
+            counter_full.add(obj_tuple, current_context)
             buffer.update_seen(obj_tuple)
             items_added += 1
         
@@ -209,7 +224,7 @@ def train_basic_count(
             actions = compute_actions(paths[path_index])
             
             record = False
-            current_context = env.unwrapped.context
+            current_context = env.get_wrapper_attr('context')
         
             if step < warmupsteps:
                 target_pos = goal_pos # goal state
@@ -217,7 +232,7 @@ def train_basic_count(
             else: 
                 target_pos = aux_pos
                 agent_pos = env.get_wrapper_attr('agent_pos')
-                aux_heatmap[current_context, agent_pos[0], agent_pos[1]] += 1
+                aux_heatmap[current_context, aux_pos[0], aux_pos[1]] += 1
                 
             
         if step % regression_freq == 0 and buffer.size >= buffer.capacity:
@@ -231,9 +246,12 @@ def train_basic_count(
                 'uniqueness': uniqueness, 
                 'images': imgs, 
                 'heatmap': heatmap_swap,
-                'counter': counter, 
+                'counter_full': counter_full, 
+                'counter_moving': counter_moving, 
                 'aux_heatmap': aux_heatmap, 
-                'explore_heatmap': explore_heatmap
+                'explore_heatmap': explore_heatmap,
+                'switch_states': switch_state_history,
+                'context_history': contexts
             } 
             
             with open(f'results/dqn_exps/{args.dir}_seed_{args.seed}_intermediate.pl', 'wb') as file:
@@ -250,9 +268,12 @@ def train_basic_count(
         'uniqueness': uniqueness, 
         'images': imgs, 
         'heatmap': heatmap_swap,
-        'counter': counter,
+        'counter_full': counter_full, 
+        'counter_moving': counter_moving, 
         'aux_heatmap': aux_heatmap, 
-        'explore_heatmap': explore_heatmap
+        'explore_heatmap': explore_heatmap,
+        'switch_states': switch_state_history,
+        'context_history': contexts
     } 
     
 if __name__ == '__main__':

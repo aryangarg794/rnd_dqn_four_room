@@ -23,7 +23,7 @@ from four_room.constants import train_config, val_config, test_config, size
 from rnd_exploration.dataset import State, Transition
 from dqn_experiments.regression_exp_utils import run_experiment
 from dqn.model import DQN
-from dqn.counter import CountBasedUncertainty
+from dqn.counter import CountBasedUncertainty, MovingCountBasedUncertainty
 
 gym.register('MiniGrid-FourRooms-v1', FourRoomsEnv)
 
@@ -39,6 +39,43 @@ class Args:
     tau: float = 0.005
     use_actions: bool = False
     device: str = 'cuda'
+    
+@torch.no_grad()
+def record_dqn_scores(agent: DQN, current_env: int, env_range: int = 5, device: str = 'cuda'):
+    env_ids = list(range(current_env-env_range, current_env+env_range+1))
+    env = gym_wrapper(gym.make(
+            'MiniGrid-FourRooms-v1', 
+            agent_pos= train_config['agent positions'],
+            goal_pos = train_config['goal positions'],
+            doors_pos = train_config['topologies'],
+            agent_dir = train_config['agent directions'],
+            size=size, 
+            render_mode='rgb_array',
+            disable_env_checker=True
+        ),
+        original_obs=True
+    )
+    
+    agent.net.eval()
+    results = np.zeros((len(env_ids), env.get_wrapper_attr('width'), env.get_wrapper_attr('height')),
+                       dtype=np.float32)
+    for idx, env_id in enumerate(env_ids):
+        obs, _ = env.reset()
+        env.get_wrapper_attr('set_context')(env_id)
+        valid_pos = env.get_wrapper_attr('valid_pos')
+
+        for i, valid_state in enumerate(valid_pos):
+            env.get_wrapper_attr('move_valid_pos')(i)
+            
+            obs, _, _, _, _ = env.step(1)
+  
+            obs_torch = torch.from_numpy(obs).to(device=device).unsqueeze(dim=0)
+            goal_action = state_to_q[State(obs)].argmax()
+            dqn_val = agent(obs_torch).squeeze()[goal_action].item()
+            results[idx, *valid_state] = dqn_val
+            
+    agent.net.train()
+    return results, env_ids
 
 def train_dqn_count(
     args: Args, 
@@ -50,13 +87,12 @@ def train_dqn_count(
     seed: int = 0,
     alpha: float = 1.5, 
     window: int = 2500, 
-    warmupsteps: int = 4000,
-    update_freq: int = 1, 
+    warmupsteps: int = 3500,
+    update_freq: int = 1,
+    eval_size: int = 10, # how many times you want to evaluate the network
     render: bool = False,
-    debug: bool = False,
+    debug: bool = False
 ): 
-    """
-    """
     rms_dqn = RunningAverage(window_size=window)
     rms_un = RunningAverage(window_size=window)
     mse_loss = nn.MSELoss()
@@ -85,7 +121,8 @@ def train_dqn_count(
         use_cnn=args.use_cnn
     )
     
-    counter = CountBasedUncertainty(capacity=args.capacity)
+    counter_moving = MovingCountBasedUncertainty(capacity=args.capacity, return_ones=True)
+    counter_full = CountBasedUncertainty(capacity=args.capacity)
 
     env = deepcopy(args.env)
     items_added = 0
@@ -99,7 +136,8 @@ def train_dqn_count(
     max_k = len(env.get_wrapper_attr('valid_pos'))
     k = np.random.randint(low=0, high=max_k)
     aux_pos = env.get_wrapper_attr('valid_pos')[k]
-    env.get_wrapper_attr('move_valid_pos')(k)
+    if warmupsteps > 0:
+        env.get_wrapper_attr('move_valid_pos')(k)
     
     paths = find_all_shortest_paths(state[:2], state[2], aux_pos, state[5:], size)
     path_index = np.random.randint(low=0, high=len(paths))
@@ -109,21 +147,29 @@ def train_dqn_count(
                                         env.get_wrapper_attr('width'), env.get_wrapper_attr('height')), dtype=bool)
     heatmap_swap = np.zeros((len(train_config['agent positions']), 
                                         env.get_wrapper_attr('width'), env.get_wrapper_attr('height')), dtype=int)
+    
+    aux_heatmap = np.zeros_like(heatmap_swap)
+    explore_heatmap = np.zeros_like(heatmap_swap)
+    switch_state_history = []
+    
     ep_colors = np.empty_like(ep_highlight_mask, dtype=object)
     
-    current_context = env.unwrapped.context
+    current_context = env.get_wrapper_attr('context')
     past_pos = []
     visit_history = deque(maxlen=args.capacity+1)
     placeholder = np.array([1.0, 0.0, 0.0])
     
     switches = 0 
     trajs_added = 0
+    contexts = []
+    intervals = list(range(num_timesteps-eval_size, num_timesteps+1))
+    dqn_scores_list = []
     
     for step in (pbar := tqdm(range(1, num_timesteps+1), disable=debug)): 
         
         obs_torch = torch.from_numpy(obs).to(device=args.device).unsqueeze(dim=0)
         state = obs_to_state(obs)
-    
+        contexts.append(current_context)
         agent_pos = env.get_wrapper_attr('agent_pos')
         
         if np.array_equal(target_pos, aux_pos) and not np.array_equal(agent_pos, aux_pos):
@@ -137,12 +183,19 @@ def train_dqn_count(
             goal_action = state_to_q[State(obs)].argmax()
             dqn_val = agent(obs_torch).squeeze()[goal_action].item()
             obj_tuple = tuple([int(item) for item in state])
-            
+        
+        obj_moving_tuple = (current_context, *agent_pos)
         obs_prime, reward, terminated, truncated, _ = env.step(action)
         done = terminated or truncated
-        uncertainty = counter[obj_tuple]
+        uncertainty = counter_moving[*obj_moving_tuple]
         
         agent_pos_after = env.get_wrapper_attr('agent_pos')
+        if not record:
+            explore_heatmap[current_context, agent_pos[0], agent_pos[1]] += 1
+        
+        if agent.buffer.has(obj_tuple):
+            rms_un.update(uncertainty)
+            rms_dqn.update(dqn_val)
         
         if step < warmupsteps or record:
             assert np.array_equal(target_pos, goal_pos) 
@@ -161,15 +214,36 @@ def train_dqn_count(
                     ep_highlight_mask[to_remove[0], to_remove[1], to_remove[2]] = False
                     ep_colors[to_remove[0], to_remove[1], to_remove[2]] = None
                     
-            counter.add(obj_tuple)
+            counter_moving.add(obj_moving_tuple, step)
+            counter_full.add(obj_tuple, current_context)
+            agent.buffer.update_seen(obj_tuple)
             items_added += 1
             
         elif dqn_val - rms_dqn.avg >= alpha * rms_dqn.std and not record: # swap to record mode 
         # elif np.array_equal(agent_pos_after, aux_pos):
+            switches += 1 
+            heatmap_swap[current_context, agent_pos[0], agent_pos[1]] += 1
             record = True
             target_pos = goal_pos
-            heatmap_swap[current_context, agent_pos_after[0], agent_pos_after[1]] += 1
-            switches += 1
+            switch_state_history.append((step, current_context, *agent_pos))
+            
+            # add the state that was used for the switch
+            agent.buffer.update(obs, action, reward, obs_prime, 0, int(done), q_value=q)
+            if render: 
+                ep_colors[current_context, agent_pos[0], agent_pos[1]] = (0, 0, 255)
+                ep_highlight_mask[current_context, agent_pos[0], agent_pos[1]] = True
+                past_pos.append(agent_pos)
+                visit_history.append((current_context, *agent_pos))
+                
+                if agent.buffer.size >= agent.buffer.capacity:
+                    to_remove = visit_history.popleft()
+                    ep_highlight_mask[to_remove[0], to_remove[1], to_remove[2]] = False
+                    ep_colors[to_remove[0], to_remove[1], to_remove[2]] = None
+                    
+            counter_moving.add(obj_moving_tuple, step)
+            counter_full.add(obj_tuple, current_context)
+            agent.buffer.update_seen(obj_tuple)
+            items_added += 1
                  
         elif (np.array_equal(agent_pos_after, aux_pos) or np.array_equal(agent_pos, aux_pos)) and not record: 
             target_pos = goal_pos
@@ -183,11 +257,9 @@ def train_dqn_count(
             env.get_wrapper_attr('remove_aux')(aux_pos)
             
         obs = obs_prime
-        rms_un.update(uncertainty)
-        rms_dqn.update(dqn_val)
         
         if step % update_freq == 0: 
-            batch_rewards, ind = counter.sample(batch_size=batch_size)
+            batch_rewards, ind = counter_moving.sample(batch_size=batch_size)
             batch_obs, batch_actions, _, batch_primes, batch_next_actions, batch_dones = agent.buffer.sample_index(ind)
             
             batch_obs = torch.cat([batch_obs, obs_torch], dim=0)
@@ -234,18 +306,24 @@ def train_dqn_count(
             paths = find_all_shortest_paths(state[:2], state[2], aux_pos, state[5:], size)
             path_index = np.random.randint(low=0, high=len(paths))
             actions = compute_actions(paths[path_index])
-        
+
+            current_context = env.get_wrapper_attr('context')
+            record = False
+            trajs_added += 1
+            
             if step < warmupsteps:
                 target_pos = goal_pos # goal state
                 env.get_wrapper_attr('move_valid_pos')(k)
             else: 
                 target_pos = aux_pos
                 
-            record = False
-            current_context = env.unwrapped.context
-            trajs_added += 1
+            
             
         agent.soft_update()
+        
+        if step in intervals:
+            dqn_scores, env_ids = record_dqn_scores(agent, current_context)
+            dqn_scores_list.append((dqn_scores, env_ids))
         
         if step % regression_freq == 0 and agent.buffer.size >= agent.buffer.capacity:
             lc, test_score = run_experiment(agent.buffer, device=args.device)
@@ -257,7 +335,14 @@ def train_dqn_count(
                 'reg_test_scores' : scores,
                 'uniqueness': uniqueness, 
                 'images': imgs, 
-                'heatmap': heatmap_swap
+                'heatmap': heatmap_swap,
+                'counter_full': counter_full, 
+                'counter_moving': counter_moving, 
+                'aux_heatmap': aux_heatmap, 
+                'explore_heatmap': explore_heatmap,
+                'switch_states': switch_state_history,
+                'context_history': contexts,
+                'dqn_scores': dqn_scores_list
             } 
             with open(f'results/dqn_exps/{args.dir}_seed_{args.seed}_intermediate.pl', 'wb') as file:
                 dill.dump(results, file)
@@ -272,23 +357,31 @@ def train_dqn_count(
         'reg_test_scores' : scores,
         'uniqueness': uniqueness, 
         'images': imgs, 
-        'heatmap': heatmap_swap, 
+        'heatmap': heatmap_swap,
+        'counter_full': counter_full, 
+        'counter_moving': counter_moving, 
+        'aux_heatmap': aux_heatmap, 
+        'explore_heatmap': explore_heatmap,
+        'switch_states': switch_state_history,
+        'context_history': contexts,
+        'dqn_scores': dqn_scores_list,
+        'running_mean': rms_dqn
     }, agent 
     
 if __name__ == '__main__':
     
     
     parser = argparse.ArgumentParser()
-    parser.add_argument('-t', '--timesteps', type=int, default=int(5e5), help='timesteps')
-    parser.add_argument('-f', '--dir', type=str, default='rnd_count', help='save name')
+    parser.add_argument('-t', '--timesteps', type=int, default=int(1e5), help='timesteps')
+    parser.add_argument('-f', '--dir', type=str, default='dqn_count_test', help='save name')
     parser.add_argument('-a', '--alpha', type=float, default=1.0, help='alpha')
     parser.add_argument('-ag', '--lr_agent', type=float, default=1e-3, help='lr for dqn agent')
     parser.add_argument('-d', '--device', type=str, default='cuda', help='device')
     parser.add_argument('-r', '--render', action='store_true', help='render mode')
-    parser.add_argument('-s', '--replaysize', type=int, default=int(1e5), help='size of replay buffer')
+    parser.add_argument('-s', '--replaysize', type=int, default=int(5e4), help='size of replay buffer')
     parser.add_argument('-seed', '--seed', type=int, default=0, help='seed')
     parser.add_argument('-b', '--batch_size', type=int, default=512, help='batch size')
-    parser.add_argument('-fr', '--freq', type=int, default=int(1e5), help='freq of regression')
+    parser.add_argument('-fr', '--freq', type=int, default=int(1e6), help='freq of regression')
     parser.add_argument('--window', type=int, default=2500, help='window size of rms_dqn')
     parser.add_argument('-tau', '--tau', type=float, default=0.005, help='tau')
     parser.add_argument('--debug', action='store_true', help='debug mode')

@@ -100,6 +100,7 @@ class FourRoomsEnv(MiniGridEnv):
         
         # an index into agent_pos, goal_pos and doors_pos with which we will initialise the environment
         self._list_idx = 0
+        self._current_context = 0
 
         if (agent_pos is not None) and (agent_dir is not None) and (goal_pos is not None) and (doors_pos is not None):
             self._list_size = len(self._agent_pos_list)
@@ -134,6 +135,7 @@ class FourRoomsEnv(MiniGridEnv):
 
 
     def _gen_grid(self, width, height):
+        self._current_context = self._list_idx
         # Create the grid
         self.grid = Grid(width, height)
 
@@ -194,8 +196,9 @@ class FourRoomsEnv(MiniGridEnv):
 
         if self._agent_pos_list is not None:
             # assumes _gen_grid() is only called once when reset() is called
+            # this moves the index for the next reset!!
             self._list_idx = (self._list_idx + 1) % self._list_size
-            
+        
         self.valid_pos = [pos for pos in self.valid_pos if (pos != self.goal_pos and pos != self.agent_pos)]
     
     def move_valid_pos(self, idx):
@@ -205,11 +208,12 @@ class FourRoomsEnv(MiniGridEnv):
         
     @property
     def context(self):
-        return self._list_idx
+        return self._current_context
     
     def set_context(self, idx):
         assert idx < self._list_size
         self._list_idx = idx
+        self.reset()
         
     def set_aux(self, aux_pos):
         aux = AuxGoal()
@@ -221,7 +225,7 @@ class FourRoomsEnv(MiniGridEnv):
     def remove_aux(self, aux_pos):
         self.grid.set(aux_pos[0], aux_pos[1], None)
         
-    def render(self, highlight_mask, colors, agent_col=(255, 0, 0), target_pos=None):
+    def render(self, highlight_mask=None, colors=None, agent_col=(255, 0, 0), target_pos=None):
         return super().render(highlight_mask, colors, agent_col, target_pos)
         
 class FourRoomsNoRotateEnv(FourRoomsEnv):
