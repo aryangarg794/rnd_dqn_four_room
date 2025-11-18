@@ -29,7 +29,16 @@ def find_states(history: list, timestep: int, capacity: int):
     return states
 
 
-def plot_env_heatmap(results, context_info: tuple, label: str, title: str, ax=None, annot: bool = True, intize: bool = True):
+def plot_env_heatmap(
+    results, 
+    context_info: tuple,
+    label: str, 
+    title: str, 
+    ax=None, 
+    agent_pos: tuple = None,  
+    annot: bool = True, 
+    intize: bool = True
+):
     """Plot environment heatmap with seaborn styling."""
     if ax is None:
         _, ax = plt.subplots(figsize=(5, 5))
@@ -57,7 +66,11 @@ def plot_env_heatmap(results, context_info: tuple, label: str, title: str, ax=No
             if j + 1 < 2:
                 pos = (xL + 1 + doors_pos[2 + i], yB)
                 highlight_cells.append(pos)
-    colors[start_pos[0], start_pos[1]] = 1
+                
+    if agent_pos is not None:
+        colors[agent_pos[0], agent_pos[1]] = 1
+    else:
+        colors[start_pos[0], start_pos[1]] = 1
     colors[goal_pos[0], goal_pos[1]] = 2
     
     for r, c in highlight_cells:
@@ -76,6 +89,7 @@ def plot_env_heatmap(results, context_info: tuple, label: str, title: str, ax=No
     sns.heatmap(
         matrix,
         cmap='magma',
+        cbar=False,
         annot=matrix_data if annot else False,
         cbar_kws={'label': label},
         ax=ax,
@@ -131,7 +145,6 @@ def plot_timestep_matplotlib(file_name: str, timestep: int, timestep_idx: int, a
     full_switches = results['heatmap']
     explored_states = results['explore_heatmap']
     aux_states = results['aux_heatmap']
-    dqn_scores = results['dqn_scores'][timestep_idx]
     
     relevant_switches = find_states(switch_history, timestep, buffer_moving.capacity)
     for switch in relevant_switches:

@@ -12,7 +12,6 @@ from copy import deepcopy
 from dataclasses import dataclass
 from tqdm import tqdm
 from collections import deque
-from line_profiler import profile
 
 from rnd_exploration.rnd import RNDNetwork
 from four_room.env import FourRoomsEnv
@@ -50,7 +49,6 @@ def compute_mc(rewards: list, gamma: float = 0.99):
         returns.insert(0, G)  
     return returns
 
-@profile
 def train_dqn_rnd(
     args: Args, 
     batch_size: int = 512, 

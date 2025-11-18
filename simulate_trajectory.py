@@ -1,4 +1,5 @@
 import matplotlib.pyplot as plt
+import argparse
 import gymnasium as gym
 import dill
 import torch
@@ -16,10 +17,46 @@ from rnd_exploration.dataset import State
 from run_dqn_count import record_dqn_scores
 from plot_interactive import plot_env_heatmap, find_states
 from dqn.model import DQN
+from rnd_exploration.rnd import RNDNetwork
 gym.register('MiniGrid-FourRooms-v1', FourRoomsEnv)
 
 @torch.no_grad()
-def simulate_trajectory(file_name: str, alpha: float = 1.0, device: str = 'cuda'):
+def get_rnd_scores(net: RNDNetwork, current_env: int, env_range: int = 5, device: str = 'cuda'):
+    env_ids = list(range(current_env-env_range, current_env+env_range+1))
+    env = gym_wrapper(gym.make(
+            'MiniGrid-FourRooms-v1', 
+            agent_pos= train_config['agent positions'],
+            goal_pos = train_config['goal positions'],
+            doors_pos = train_config['topologies'],
+            agent_dir = train_config['agent directions'],
+            size=size, 
+            render_mode='rgb_array',
+            disable_env_checker=True
+        ),
+        original_obs=True
+    )
+    
+    net.rnd_net.eval()
+    results = np.zeros((len(env_ids), env.get_wrapper_attr('width'), env.get_wrapper_attr('height')),
+                       dtype=np.float32)
+    
+    for idx, env_id in enumerate(env_ids):
+        obs, _ = env.reset()
+        env.get_wrapper_attr('set_context')(env_id)
+        valid_pos = env.get_wrapper_attr('valid_pos')
+
+        for i, valid_state in enumerate(valid_pos):
+            env.get_wrapper_attr('move_valid_pos')(i)
+            
+            obs, _, _, _, _ = env.step(1)
+            rnd_val = net.get_error(obs).item()
+            results[idx, *valid_state] = rnd_val
+                
+    net.rnd_net.train()
+    return results, env_ids
+
+@torch.no_grad()
+def simulate_trajectory(file_name: str, alpha: float = 1.0, device: str = 'cuda', rnd: bool = False):
     
     env = gym_wrapper(gym.make(
                 'MiniGrid-FourRooms-v1', 
@@ -36,11 +73,13 @@ def simulate_trajectory(file_name: str, alpha: float = 1.0, device: str = 'cuda'
     
     with open(f'results/dqn_exps/{file_name}.pl', 'rb') as file:
         results = dill.load(file)
+        
     aux_states = results['aux_heatmap']
-    
     counter = results['counter_moving']
     rms_dqn = results['running_mean']
     timesteps = len(results['context_history'])
+    explore_map = results['explore_heatmap']
+    switch_map = results['heatmap']
         
     agent = DQN(env, deepcopy(env), device=device)
     agent.net.load_state_dict(torch.load(f'results/models/{file_name}.pt', weights_only=True))
@@ -80,6 +119,13 @@ def simulate_trajectory(file_name: str, alpha: float = 1.0, device: str = 'cuda'
             ep_highlight_mask[state[1], state[2]] = True
             ep_colors[state[1], state[2]] = (51, 0, 102)
             
+    if rnd:
+        rnd_net = RNDNetwork(env, device=device)
+        rnd_net.load(f'results/models/rnd/{file_name}.pt')       
+        rnd_scores, _ = get_rnd_scores(rnd_net, random_context, env_range=0, device=device)
+        rms_rnd = results['running_mean_rnd']
+        normalized_rnd = (rnd_scores - rms_rnd.avg) / rms_rnd.std
+    
     while not done:
         
         step += 1
@@ -116,19 +162,80 @@ def simulate_trajectory(file_name: str, alpha: float = 1.0, device: str = 'cuda'
         agent_col = (255, 0, 0) if record else (0, 0, 255) 
         render = env.unwrapped.render(highlight_mask=ep_highlight_mask, colors=ep_colors, agent_col=agent_col)
         env.get_wrapper_attr('remove_aux')(aux_pos)
-            
-        fig, axes = plt.subplots(1, 4, figsize=(40, 10))
         
-        axes[0].imshow(cv2.transpose(render))
-        axes[0].set_title('Env Render')
-        axes[0].axis('off')
+        fig, axes = plt.subplots(2, 4, figsize=(40, 20))
         
-        plot_env_heatmap(normalized_scores.squeeze(), context_info,
-                     'Normalized DQN Scores', f'Normalized DQN Scores for context {random_context}', axes[1], intize=False)
-        plot_env_heatmap(dqn_scores.squeeze(), context_info,
-                     'DQN Scores', f'DQN Scores for context {random_context}', axes[2], intize=False) 
-        plot_env_heatmap(relevant_buffer[random_context], context_info,
-                     'Buffer Counts', f'Buffer Heatmap for context {random_context}', axes[3])
+        axes[0, 0].imshow(cv2.transpose(render))
+        axes[0, 0].set_title('Env Render')
+        axes[0, 0].axis('off')
+        
+        plot_env_heatmap(
+            normalized_scores.squeeze(), 
+            context_info,
+            'Normalized DQN Scores', 
+            f'(Maxed) Normalized DQN Scores for context {random_context}', 
+            axes[0, 1], 
+            agent_pos=agent_pos,
+            intize=False
+        )
+        
+        plot_env_heatmap(
+            dqn_scores.squeeze(), 
+            context_info,
+            'DQN Scores', 
+            f'(Maxed) DQN Scores for context {random_context}', 
+            axes[0, 2], 
+            agent_pos=agent_pos,
+            intize=False
+        ) 
+        
+        plot_env_heatmap(
+            relevant_buffer[random_context],
+            context_info,
+            'Buffer Counts',
+            f'Buffer Heatmap for context {random_context}',
+            axes[0, 3],
+            agent_pos=agent_pos,
+        )
+
+        plot_env_heatmap(
+            explore_map[random_context],
+            context_info,
+            'Explore Phase',
+            f'Explore Phase for context {random_context}',
+            axes[1, 0],
+            agent_pos=agent_pos
+        )
+
+        plot_env_heatmap(
+            switch_map[random_context],
+            context_info,
+            'Switch Numbers',
+            f'Switches (full) for context {random_context}',
+            axes[1, 1],
+            agent_pos=agent_pos,
+        )
+
+        if rnd:
+            plot_env_heatmap(
+                normalized_rnd.squeeze(),
+                context_info,
+                'Normalized RND Scores',
+                f'Normalized RND Scores for context {random_context}',
+                axes[1, 2],
+                agent_pos=agent_pos,
+                intize=False
+            )
+
+            plot_env_heatmap(
+                rnd_scores.squeeze(),
+                context_info,
+                'RND Scores',
+                f'RND Scores for context {random_context}',
+                axes[1, 3],
+                agent_pos=agent_pos,
+                intize=False
+            )
         
         fig.tight_layout()
         # fig.savefig(f'results/videos/image_{step}.png')
@@ -162,4 +269,10 @@ def simulate_trajectory(file_name: str, alpha: float = 1.0, device: str = 'cuda'
     print(f"Saved video")
     
 if __name__ == '__main__':
-    simulate_trajectory('dqn_count_test_seed_0_100000')
+    parser = argparse.ArgumentParser()
+    parser.add_argument('-r', '--rnd', action='store_true', help='rnd mode')
+    parser.add_argument('-f', '--dir', type=str, default='dqn_count_test', help='save name')
+    
+    args = parser.parse_args()
+    
+    simulate_trajectory(args.dir, rnd=args.rnd)

@@ -66,6 +66,7 @@ class RNDNetwork:
         lr: float = 1e-5,
         device: str = 'cpu',
         use_cnn: bool = True,
+        scale_params: bool = False, 
         *args, 
         **kwargs
     ) -> None:
@@ -80,13 +81,14 @@ class RNDNetwork:
         ).to(device)
         self.rnd_net = BaseNetwork(use_actions, env.observation_space, env.action_space, use_cnn=use_cnn).to(device)
         
-        for param in self.target_net.parameters():
-            param.requires_grad = False
-            param.data = param.data * 10
-            
-        with torch.no_grad():
-            for param in self.rnd_net.parameters():
+        if scale_params:
+            for param in self.target_net.parameters():
+                param.requires_grad = False
                 param.data = param.data * 10
+                
+            with torch.no_grad():
+                for param in self.rnd_net.parameters():
+                    param.data = param.data * 10
         
         self.optimizer = torch.optim.Adam(self.rnd_net.parameters(), lr=lr)
         self.device = device
@@ -121,10 +123,20 @@ class RNDNetwork:
     def sanitize(self, tensor: Tensor) -> Tensor:
         if not isinstance(tensor, Tensor):
             tensor = torch.as_tensor(tensor, device=self.device) 
-        if tensor.size(0) != 1: 
+        if len(tensor.shape) < 4: 
             tensor = tensor.unsqueeze(dim=0)
         return tensor
-        
+    
+    def save(self, file_name: str) -> None:
+        torch.save({
+            'target_net' : self.target_net.state_dict(),
+            'net' : self.rnd_net.state_dict()
+        }, file_name) 
+    
+    def load(self, file_name: str) -> None:
+        weights = torch.load(file_name, weights_only=True)
+        self.target_net.load_state_dict(weights['target_net'])
+        self.rnd_net.load_state_dict(weights['net']) 
         
 if __name__ == "__main__":
     gym.register('MiniGrid-FourRooms-v1', FourRoomsEnv)

@@ -57,7 +57,7 @@ def record_dqn_scores(agent: DQN, current_env: int, env_range: int = 5, device: 
     )
     
     agent.net.eval()
-    results = np.zeros((len(env_ids), env.get_wrapper_attr('width'), env.get_wrapper_attr('height')),
+    results = np.zeros((4, len(env_ids), env.get_wrapper_attr('width'), env.get_wrapper_attr('height')),
                        dtype=np.float32)
     for idx, env_id in enumerate(env_ids):
         obs, _ = env.reset()
@@ -67,15 +67,18 @@ def record_dqn_scores(agent: DQN, current_env: int, env_range: int = 5, device: 
         for i, valid_state in enumerate(valid_pos):
             env.get_wrapper_attr('move_valid_pos')(i)
             
-            obs, _, _, _, _ = env.step(1)
-  
-            obs_torch = torch.from_numpy(obs).to(device=device).unsqueeze(dim=0)
-            goal_action = state_to_q[State(obs)].argmax()
-            dqn_val = agent(obs_torch).squeeze()[goal_action].item()
-            results[idx, *valid_state] = dqn_val
+            for _ in range(4): # for each direction we want to store the state-q value pair
+                obs, _, _, _, _ = env.step(1)
+                state = obs_to_state(obs)
+                agent_dir = state[2]
+                
+                obs_torch = torch.from_numpy(obs).to(device=device).unsqueeze(dim=0)
+                goal_action = state_to_q[State(obs)].argmax()
+                dqn_val = agent(obs_torch).squeeze()[goal_action].item()
+                results[agent_dir, idx, *valid_state] = dqn_val
             
     agent.net.train()
-    return results, env_ids
+    return results.max(axis=0), env_ids
 
 def train_dqn_count(
     args: Args, 
