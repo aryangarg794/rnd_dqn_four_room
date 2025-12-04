@@ -1,0 +1,159 @@
+import gymnasium as gym
+import numpy as np
+import torch 
+
+from dqn.model import DQN
+from rnd_exploration.rnd import RNDNetwork
+from rnd_exploration.dataset import State
+from four_room.wrappers import gym_wrapper
+from four_room.utils import obs_to_state
+from four_room.constants import train_config, size, state_to_q
+from utils.q_values import compute_q_value
+
+@torch.no_grad()
+def get_rnd_scores(net: RNDNetwork, current_env: int, env_range: int = 5, device: str = 'cuda'):
+    env_ids = list(range(current_env-env_range, current_env+env_range+1))
+    env = gym_wrapper(gym.make(
+            'MiniGrid-FourRooms-v1', 
+            agent_pos= train_config['agent positions'],
+            goal_pos = train_config['goal positions'],
+            doors_pos = train_config['topologies'],
+            agent_dir = train_config['agent directions'],
+            size=size, 
+            render_mode='rgb_array',
+            disable_env_checker=True
+        ),
+        original_obs=True
+    )
+    
+    net.rnd_net.eval()
+    results = np.zeros((len(env_ids), env.get_wrapper_attr('width'), env.get_wrapper_attr('height')),
+                       dtype=np.float32)
+    
+    for idx, env_id in enumerate(env_ids):
+        env.get_wrapper_attr('set_context')(env_id)
+        obs, _ = env.reset()
+        valid_pos = env.get_wrapper_attr('valid_pos')
+
+        for i, valid_state in enumerate(valid_pos):
+            env.get_wrapper_attr('move_valid_pos')(i)
+            
+            obs, _, _, _, _ = env.step(1)
+            rnd_val = net.get_error(obs).item()
+            results[idx, *valid_state] = rnd_val
+                
+    net.rnd_net.train()
+    return results, env_ids
+
+def get_q_optimal(counter, current_env: int, env_range: int = 5, gamma: float = 0.99):
+    env_ids = list(range(current_env-env_range, current_env+env_range+1))
+    env = gym_wrapper(gym.make(
+            'MiniGrid-FourRooms-v1', 
+            agent_pos= train_config['agent positions'],
+            goal_pos = train_config['goal positions'],
+            doors_pos = train_config['topologies'],
+            agent_dir = train_config['agent directions'],
+            size=size, 
+            render_mode='rgb_array',
+            disable_env_checker=True
+        ),
+        original_obs=True
+    )
+    
+    results = np.zeros((4, len(env_ids), env.get_wrapper_attr('width'), env.get_wrapper_attr('height')),
+                       dtype=np.float32)
+    start_state, _, _ = env.get_wrapper_attr('context_info')(current_env)
+    for idx, env_id in enumerate(env_ids):
+        env.get_wrapper_attr('set_context')(env_id)
+        obs, _ = env.reset()
+        valid_pos = env.get_wrapper_attr('valid_pos') + [start_state]
+
+        for i, valid_state in enumerate(valid_pos):
+            env.get_wrapper_attr('move_state')(valid_state)
+            
+            for _ in range(4): # for each direction we want to store the state-q value pair
+                obs, _, _, _, _ = env.step(1)
+                state = obs_to_state(obs)
+                agent_dir = state[2]
+
+                dqn_val = compute_q_value(obs, env_id, counter, gamma)
+                results[agent_dir, idx, *valid_state] = dqn_val
+                
+    return results.max(axis=0), env_ids, results
+
+def record_uncertainty_scores(counter, current_env: int, env_range: int = 5):
+    env_ids = list(range(current_env-env_range, current_env+env_range+1))
+    env = gym_wrapper(gym.make(
+            'MiniGrid-FourRooms-v1', 
+            agent_pos= train_config['agent positions'],
+            goal_pos = train_config['goal positions'],
+            doors_pos = train_config['topologies'],
+            agent_dir = train_config['agent directions'],
+            size=size, 
+            render_mode='rgb_array',
+            disable_env_checker=True
+        ),
+        original_obs=True
+    )
+    
+    results = np.zeros((4, len(env_ids), env.get_wrapper_attr('width'), env.get_wrapper_attr('height')),
+                       dtype=np.float32)
+    start_state, _, _ = env.get_wrapper_attr('context_info')(current_env)
+    for idx, env_id in enumerate(env_ids):
+        env.get_wrapper_attr('set_context')(env_id)
+        obs, _ = env.reset()
+        valid_pos = env.get_wrapper_attr('valid_pos') + [start_state]
+
+        for i, valid_state in enumerate(valid_pos):
+            env.get_wrapper_attr('move_state')(valid_state)
+            
+            for _ in range(4): 
+                obs, _, _, _, _ = env.step(1)
+                state = obs_to_state(obs)
+                agent_dir = state[2]
+                
+                un_val = counter[env_id, *valid_state, agent_dir]
+                results[agent_dir, idx, *valid_state] = un_val
+            
+    return results.min(axis=0), env_ids, results
+    
+@torch.no_grad()
+def record_dqn_scores(agent: DQN, current_env: int, env_range: int = 5, device: str = 'cuda'):
+    env_ids = list(range(current_env-env_range, current_env+env_range+1))
+    env = gym_wrapper(gym.make(
+            'MiniGrid-FourRooms-v1', 
+            agent_pos= train_config['agent positions'],
+            goal_pos = train_config['goal positions'],
+            doors_pos = train_config['topologies'],
+            agent_dir = train_config['agent directions'],
+            size=size, 
+            render_mode='rgb_array',
+            disable_env_checker=True
+        ),
+        original_obs=True
+    )
+    
+    agent.net.eval()
+    results = np.zeros((4, len(env_ids), env.get_wrapper_attr('width'), env.get_wrapper_attr('height')),
+                       dtype=np.float32)
+    start_state, _, _ = env.get_wrapper_attr('context_info')(current_env)
+    for idx, env_id in enumerate(env_ids):
+        env.get_wrapper_attr('set_context')(env_id)
+        obs, _ = env.reset()
+        valid_pos = env.get_wrapper_attr('valid_pos') + [start_state]
+
+        for i, valid_state in enumerate(valid_pos):
+            env.get_wrapper_attr('move_state')(valid_state)
+            
+            for _ in range(4): # for each direction we want to store the state-q value pair
+                obs, _, _, _, _ = env.step(1)
+                state = obs_to_state(obs)
+                agent_dir = state[2]
+                
+                obs_torch = torch.from_numpy(obs).to(device=device).unsqueeze(dim=0)
+                goal_action = state_to_q[State(obs)].argmax()
+                dqn_val = agent(obs_torch).squeeze()[goal_action].item()
+                results[agent_dir, idx, *valid_state] = dqn_val
+            
+    agent.net.train()
+    return results.max(axis=0), env_ids, results
