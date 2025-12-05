@@ -126,7 +126,7 @@ def train_dqn_count(
         hidden_layers=[128, 512, 512, 128]
     )
     
-    counter_moving = MovingCountBasedUncertainty(capacity=args.capacity, return_ones=return_ones)
+    counter_moving = MovingCountBasedUncertainty(capacity=args.capacity, return_ones=return_ones, device=args.device)
     print(return_ones)
     counter_full = CountBasedUncertainty(capacity=args.capacity)
 
@@ -169,8 +169,8 @@ def train_dqn_count(
     switches = 0 
     trajs_added = 0
     contexts = []
-    last_ep = LastEpisode(args.env.observation_space.shape, capacity=last_episode_len)
-    last_expl_ep = LastEpisode(args.env.observation_space.shape, capacity=last_episode_len)
+    last_ep = LastEpisode(args.env.observation_space.shape, capacity=last_episode_len, device=args.device)
+    last_expl_ep = LastEpisode(args.env.observation_space.shape, capacity=last_episode_len, device=args.device)
     
     
     for step in (pbar := tqdm(range(1, num_timesteps+1), disable=debug)): 
@@ -199,8 +199,8 @@ def train_dqn_count(
         if dqn_val - rms_dqn.avg >= alpha * rms_dqn.std and not record: # swap to record mode 
         # elif np.array_equal(agent_pos_after, aux_pos):
         
-            if np.array_equal(start_state, agent_pos):  
-                print(f'Timestep: {step} | Normalized: {norm:.4f} | Context: {current_context} | Dir: {state[2]} | Switch Count: {heatmap_swap[current_context, *start_state]} | Uncert: {uncertainty:.4f} | In: {agent.buffer.has(obj_moving_tuple)} | Count: {counter_moving.counts[*obj_moving_tuple]} | Buffer size: {agent.buffer.size} | Uniqueness: {agent.buffer.ratio_unique_trans:.4f}')
+            # if np.array_equal(start_state, agent_pos):  
+            #     print(f'Timestep: {step} | Normalized: {norm:.4f} | Context: {current_context} | Dir: {state[2]} | Switch Count: {heatmap_swap[current_context, *start_state]} | Uncert: {uncertainty:.4f} | In: {agent.buffer.has(obj_moving_tuple)} | Count: {counter_moving.counts[*obj_moving_tuple]} | Buffer size: {agent.buffer.size} | Uniqueness: {agent.buffer.ratio_unique_trans:.4f}')
 
             switches += 1 
             heatmap_swap[current_context, agent_pos[0], agent_pos[1]] += 1
@@ -267,7 +267,6 @@ def train_dqn_count(
             last_obs, last_action, last_rewards, last_obs_primes, last_next_actions, last_dones = last_ep.get(counter_moving)            
             (last_obs_expl, last_action_expl, last_rewards_expl, 
              last_obs_primes_expl, last_next_actions_expl, last_dones_expl) = last_ep.get(counter_moving) 
-            
             
             batch_obs = torch.cat([batch_obs, last_obs, last_obs_expl], dim=0)
             batch_actions = torch.cat([batch_actions, last_action, last_action_expl], dim=0)

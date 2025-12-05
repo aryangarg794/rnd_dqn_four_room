@@ -28,9 +28,6 @@ from utils.q_values import compute_q_value, optimal_q_action
 
 gym.register('MiniGrid-FourRooms-v1', FourRoomsEnv)
 
-print('helloooo')
-print(*(0, 1, 2))
-
 @dataclass
 class Args:
     env: gym.Env

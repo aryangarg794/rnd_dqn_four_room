@@ -97,7 +97,7 @@ class DQN:
         self.epsilon = start_epsilon
         
         self.buffer = ReplayBuffer(state_dim=env.observation_space.shape, 
-                                   capacity=capacity, num_actions=env.action_space.n)
+                                   capacity=capacity, num_actions=env.action_space.n, device=device)
         self.optimizer = torch.optim.Adam(self.net.parameters(), lr=lr)
         
         self.tau = tau
