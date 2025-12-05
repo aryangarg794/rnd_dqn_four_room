@@ -369,17 +369,17 @@ if __name__ == '__main__':
     
     
     parser = argparse.ArgumentParser()
-    parser.add_argument('-t', '--timesteps', type=int, default=int(1e5), help='timesteps')
+    parser.add_argument('-t', '--timesteps', type=int, default=int(3e5), help='timesteps')
     parser.add_argument('-f', '--dir', type=str, default='dqn_count_test', help='save name')
     parser.add_argument('-a', '--alpha', type=float, default=1.0, help='alpha')
     parser.add_argument('-ag', '--lr_agent', type=float, default=1e-3, help='lr for dqn agent')
     parser.add_argument('-d', '--device', type=str, default='cuda', help='device')
     parser.add_argument('-r', '--render', action='store_true', help='render mode')
-    parser.add_argument('-s', '--replaysize', type=int, default=int(5e4), help='size of replay buffer')
+    parser.add_argument('-s', '--replaysize', type=int, default=int(1e5), help='size of replay buffer')
     parser.add_argument('-seed', '--seed', type=int, default=0, help='seed')
     parser.add_argument('-b', '--batch_size', type=int, default=256, help='batch size')
     parser.add_argument('-fr', '--freq', type=int, default=int(1e6), help='freq of regression')
-    parser.add_argument('--window', type=int, default=2500, help='window size of rms_dqn')
+    parser.add_argument('--window', type=int, default=3500, help='window size of rms_dqn')
     parser.add_argument('-tau', '--tau', type=float, default=0.005, help='tau')
     parser.add_argument('--debug', action='store_true', help='debug mode')
     parser.add_argument('--return_ones', action='store_true', help='return ones')
@@ -448,9 +448,7 @@ if __name__ == '__main__':
     
     torch.save(agent.net.state_dict(), f'results/models/{args.dir}_seed_{args.seed}_{args.timesteps}.pt')
     
-    alpha = str(args.alpha).replace('.', '')
-    clear_lr = str(args.lr_agent).replace('.', '')
-    with open(f'results/dqn_exps/{args.dir}_alpha{alpha}_lr_{clear_lr}_seed_{args.seed}_{args.timesteps}.pl', 'wb') as file:
+    with open(f'results/dqn_exps/{args.dir}_seed_{args.seed}_{args.timesteps}.pl', 'wb') as file:
         dill.dump(results, file)
     
     if args.render:

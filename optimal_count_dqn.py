@@ -24,9 +24,12 @@ from rnd_exploration.dataset import State, Transition, ReplayBuffer
 from dqn_experiments.regression_exp_utils import run_experiment
 from dqn.model import DQN
 from dqn.counter import CountBasedUncertainty, MovingCountBasedUncertainty
-from utils.q_values import compute_q_value
+from utils.q_values import compute_q_value, optimal_q_action
 
 gym.register('MiniGrid-FourRooms-v1', FourRoomsEnv)
+
+print('helloooo')
+print(*(0, 1, 2))
 
 @dataclass
 class Args:
@@ -48,11 +51,13 @@ def train_dqn_count(
     regression_freq: int = 50000,
     seed: int = 0,
     alpha: float = 1.5, 
-    window: int = 2500, 
+    window: int = 3500, 
     warmupsteps: int = 0,
     render: bool = False,
     debug: bool = False,
     return_ones: bool = True,
+    alt_explore: bool = False, 
+    K: int = 30
 ): 
     rms_dqn = RunningAverage(window_size=window)
     rms_un = RunningAverage(window_size=window)
@@ -121,6 +126,9 @@ def train_dqn_count(
     switches = 0 
     trajs_added = 0
     contexts = []
+    num_expl = 0
+    explore_steps = np.random.randint(low=1, high=K)
+    walls = env.get_wrapper_attr('walls')()
     
     for step in (pbar := tqdm(range(1, num_timesteps+1), disable=debug)): 
     
@@ -128,8 +136,11 @@ def train_dqn_count(
         contexts.append(current_context)
         agent_pos = env.get_wrapper_attr('agent_pos')
         
-        if np.array_equal(target_pos, aux_pos) and not np.array_equal(agent_pos, aux_pos):
+        if np.array_equal(target_pos, aux_pos) and not np.array_equal(agent_pos, aux_pos) and not alt_explore:
             action = actions.pop(0)
+        elif alt_explore and num_expl <= explore_steps and not record:
+            action = optimal_q_action(obs, current_context, walls, counter_moving, gamma) 
+            num_expl += 1
         else:
             q = state_to_q[State(state=obs)]
             action = q.argmax() if isinstance(q, np.ndarray) else np.array(q).argmax()
@@ -147,8 +158,8 @@ def train_dqn_count(
         if dqn_val - rms_dqn.avg >= alpha * rms_dqn.std and not record: # swap to record mode 
         # elif np.array_equal(agent_pos_after, aux_pos):
         
-            if np.array_equal(start_state, agent_pos):  
-                print(f'Timestep: {step} | Normalized: {norm:.4f} | Context: {current_context} | Dir: {state[2]} | Switch Count: {heatmap_swap[current_context, *start_state]} | Uncert: {uncertainty:.4f} | In: {buffer.has(obj_moving_tuple)} | Count: {counter_moving.counts[*obj_moving_tuple]} | Buffer size: {buffer.size} | Uniqueness: {buffer.ratio_unique_trans:.4f}')
+            # if np.array_equal(start_state, agent_pos):  
+            #     print(f'Timestep: {step} | Normalized: {norm:.4f} | Context: {current_context} | Dir: {state[2]} | Switch Count: {heatmap_swap[current_context, *start_state]} | Uncert: {uncertainty:.4f} | In: {buffer.has(obj_moving_tuple)} | Count: {counter_moving.counts[*obj_moving_tuple]} | Buffer size: {buffer.size} | Uniqueness: {buffer.ratio_unique_trans:.4f}')
 
             switches += 1 
             heatmap_swap[current_context, agent_pos[0], agent_pos[1]] += 1
@@ -157,8 +168,11 @@ def train_dqn_count(
             switch_state_history.append((step, current_context, *agent_pos))
             action = goal_action
                  
-        elif np.array_equal(agent_pos, aux_pos) and not record: 
+        elif np.array_equal(agent_pos, aux_pos) and not record and not alt_explore: 
             target_pos = goal_pos
+        elif num_expl >= explore_steps:
+            target_pos = goal_pos
+         
         
         obs_prime, reward, terminated, truncated, _ = env.step(action)
         done = terminated or truncated
@@ -174,8 +188,8 @@ def train_dqn_count(
         
         if step < warmupsteps or record:
             assert np.array_equal(target_pos, goal_pos) 
-            
             # print(f'Timestep: {step} | Context: {current_context} | State: {agent_pos} | Dir: {state[2]} | Switch Count: {heatmap_swap[current_context, *agent_pos]} | Uncert: {uncertainty:.4f} | Count: {counter_moving.counts[*obj_moving_tuple]}')
+            q = state_to_q[State(state=obs)]
             q_next = state_to_q[State(state=obs_prime)] if not done else placeholder
             next_action = q_next.argmax()
             buffer.update(obs, action, reward, obs_prime, next_action, int(done), q_value=q)
@@ -227,8 +241,12 @@ def train_dqn_count(
 
             current_context = env.get_wrapper_attr('context')
             start_state, _, _ = env.get_wrapper_attr('context_info')(current_context)
+            walls = env.get_wrapper_attr('walls')()
             record = False
             trajs_added += 1
+            
+            num_expl = 0
+            explore_steps = np.random.randint(low=1, high=K)
             
             if step < warmupsteps:
                 target_pos = goal_pos # goal state
@@ -260,7 +278,7 @@ def train_dqn_count(
         
         uniqueness.append(buffer.ratio_unique_trans)
         value = (dqn_val - rms_dqn.avg)/rms_dqn.std  
-        pbar.set_description(f"Training RND DQN | Uniqueness: {buffer.ratio_unique_trans:.4f} | Last Regression Exp: {(scores[-1] if len(scores) > 0 else 0):.4f} | Total Items added: {items_added} | Current Context: {current_context} | RND Val: {dqn_val:.4f} | Avg: {rms_dqn.avg:.4f} | STD: {rms_dqn.std:.4f} | Switches: {switches} | Value: {value:.4f}")
+        pbar.set_description(f"Training RND DQN | ")
         # pbar.set_description(f"Training RND Count | Uniqueness: {agent.buffer.ratio_unique_trans:.4f} | Regression Exp: {(scores[-1] if len(scores) > 0 else 0):.4f} | Items added: {items_added} | Context: {current_context}")
     
     return {
@@ -284,17 +302,18 @@ if __name__ == '__main__':
     
     
     parser = argparse.ArgumentParser()
-    parser.add_argument('-t', '--timesteps', type=int, default=int(1e5), help='timesteps')
+    parser.add_argument('-t', '--timesteps', type=int, default=int(3e5), help='timesteps')
     parser.add_argument('-f', '--dir', type=str, default='dqn_count_test', help='save name')
     parser.add_argument('-a', '--alpha', type=float, default=1.0, help='alpha')
     parser.add_argument('-d', '--device', type=str, default='cpu', help='device')
     parser.add_argument('-r', '--render', action='store_true', help='render mode')
-    parser.add_argument('-s', '--replaysize', type=int, default=int(5e4), help='size of replay buffer')
+    parser.add_argument('-s', '--replaysize', type=int, default=int(1e5), help='size of replay buffer')
     parser.add_argument('-seed', '--seed', type=int, default=0, help='seed')
     parser.add_argument('-fr', '--freq', type=int, default=int(1e6), help='freq of regression')
-    parser.add_argument('--window', type=int, default=2500, help='window size of rms_dqn')
+    parser.add_argument('--window', type=int, default=3500, help='window size of rms_dqn')
     parser.add_argument('--debug', action='store_true', help='debug mode')
     parser.add_argument('--return_ones', action='store_true', help='return ones')
+    parser.add_argument('--alt', action='store_true', help='alt_explore')
     
     args = parser.parse_args()
     
@@ -352,11 +371,11 @@ if __name__ == '__main__':
         render=args.render,
         debug=args.debug,
         window=args.window,
-        return_ones=args.return_ones
+        return_ones=args.return_ones,
+        alt_explore=args.alt
     )
     
-    alpha = str(args.alpha).replace('.', '')
-    with open(f'results/dqn_exps/{args.dir}_alpha{alpha}_seed_{args.seed}_{args.timesteps}.pl', 'wb') as file:
+    with open(f'results/dqn_exps/{args.dir}_seed_{args.seed}_{args.timesteps}.pl', 'wb') as file:
         dill.dump(results, file)
     
     if args.render:

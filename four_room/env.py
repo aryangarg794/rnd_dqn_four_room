@@ -120,6 +120,8 @@ class FourRoomsEnv(MiniGridEnv):
             highlight=True,
             **kwargs
         )
+        
+        self.walls_list = []
 
     def reset(self, *, seed: int | None = None, options: dict[str, Any] | None = None,):
         if seed and self._agent_pos_list is not None:
@@ -200,6 +202,12 @@ class FourRoomsEnv(MiniGridEnv):
             self._list_idx = (self._list_idx + 1) % self._list_size
         
         self.valid_pos = [pos for pos in self.valid_pos if (pos != self.goal_pos and pos != self.agent_pos)]
+        
+        for y in range(self.height):
+            for x in range(self.height):
+                cell = self.grid.get(x, y)
+                if cell is not None:
+                    self.walls_list.append((x, y)) 
     
     def move_valid_pos(self, idx):
         self.agent_pos = self.valid_pos[idx]
@@ -214,6 +222,9 @@ class FourRoomsEnv(MiniGridEnv):
         assert idx < self._list_size
         self._list_idx = idx
         # self.reset() # CALL RESET AFTER USING THIS FUNC
+        
+    def walls(self):
+        return self.walls_list
         
     def move_state(self, state):
         if len(state) == 2:
