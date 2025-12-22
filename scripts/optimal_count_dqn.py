@@ -15,7 +15,6 @@ from collections import deque
 
 from four_room.env import FourRoomsEnv
 from four_room.utils import obs_to_state
-from four_room.shortest_path import find_all_action_values, find_all_shortest_paths, compute_actions
 from four_room.wrappers import gym_wrapper
 from four_room.constants import state_to_q
 from rnd_exploration.utils import RunningAverage
@@ -25,6 +24,7 @@ from dqn_experiments.regression_exp_utils import run_experiment
 from dqn.model import DQN
 from dqn.counter import CountBasedUncertainty, MovingCountBasedUncertainty
 from utils.q_values import compute_q_value, optimal_q_action
+from utils.exploration import aux_pos_random_path, aux_pos_multiple
 
 gym.register('MiniGrid-FourRooms-v1', FourRoomsEnv)
 
@@ -43,7 +43,7 @@ class Args:
     
 def train_dqn_count(
     args: Args, 
-    gamma: float = 0.99, 
+    gamma: float = 0.95, 
     num_timesteps: int = int(2e5), 
     regression_freq: int = 50000,
     seed: int = 0,
@@ -52,9 +52,9 @@ def train_dqn_count(
     warmupsteps: int = 0,
     render: bool = False,
     debug: bool = False,
-    return_ones: bool = True,
+    return_ones: bool = False,
     alt_explore: bool = False, 
-    K: int = 30
+    eps: float = 0.0, 
 ): 
     rms_dqn = RunningAverage(window_size=window)
     rms_un = RunningAverage(window_size=window)
@@ -92,16 +92,15 @@ def train_dqn_count(
     state = obs_to_state(obs)
     goal_pos = state[3:5]
     target_pos = state[3:5] # first phase is warmup
+    aux_pos = None
     
     max_k = len(env.get_wrapper_attr('valid_pos'))
     k = np.random.randint(low=0, high=max_k)
-    aux_pos = env.get_wrapper_attr('valid_pos')[k]
     if warmupsteps > 0:
         env.get_wrapper_attr('move_valid_pos')(k)
     
-    paths = find_all_shortest_paths(state[:2], state[2], aux_pos, state[5:], size)
-    path_index = np.random.randint(low=0, high=len(paths))
-    actions = compute_actions(paths[path_index])
+    actions, path = aux_pos_random_path(state, env)
+    aux_pos = (path[-1][0], path[-1][1])
     
     ep_highlight_mask = np.zeros((len(train_config['agent positions']), 
                                         env.get_wrapper_attr('width'), env.get_wrapper_attr('height')), dtype=bool)
@@ -115,7 +114,6 @@ def train_dqn_count(
     ep_colors = np.empty_like(ep_highlight_mask, dtype=object)
     
     current_context = env.get_wrapper_attr('context')
-    start_state, _, _ = env.get_wrapper_attr('context_info')(current_context)
     past_pos = []
     visit_history = deque(maxlen=args.capacity+1)
     placeholder = np.array([1.0, 0.0, 0.0])
@@ -123,9 +121,7 @@ def train_dqn_count(
     switches = 0 
     trajs_added = 0
     contexts = []
-    num_expl = 0
-    explore_steps = np.random.randint(low=1, high=K)
-    walls = env.get_wrapper_attr('walls')()
+    failed_to_add = False
     
     for step in (pbar := tqdm(range(1, num_timesteps+1), disable=debug)): 
     
@@ -133,14 +129,14 @@ def train_dqn_count(
         contexts.append(current_context)
         agent_pos = env.get_wrapper_attr('agent_pos')
         
-        if np.array_equal(target_pos, aux_pos) and not np.array_equal(agent_pos, aux_pos) and not alt_explore:
+        if len(actions) != 0 and not alt_explore and not record:
             action = actions.pop(0)
-        elif alt_explore and num_expl <= explore_steps and not record:
-            action = optimal_q_action(obs, current_context, walls, counter_moving, gamma) 
-            num_expl += 1
+        elif np.random.random() < eps: 
+            action = np.random.randint(low=0, high=3)
         else:
             q = state_to_q[State(state=obs)]
             action = q.argmax() if isinstance(q, np.ndarray) else np.array(q).argmax()
+            failed_to_add = True
         
         with torch.no_grad():
             goal_action = state_to_q[State(obs)].argmax()
@@ -152,24 +148,13 @@ def train_dqn_count(
             
         norm = (dqn_val - rms_dqn.avg)/rms_dqn.std
         
-        if dqn_val - rms_dqn.avg >= alpha * rms_dqn.std and not record: # swap to record mode 
-        # elif np.array_equal(agent_pos_after, aux_pos):
-        
-            # if np.array_equal(start_state, agent_pos):  
-            #     print(f'Timestep: {step} | Normalized: {norm:.4f} | Context: {current_context} | Dir: {state[2]} | Switch Count: {heatmap_swap[current_context, *start_state]} | Uncert: {uncertainty:.4f} | In: {buffer.has(obj_moving_tuple)} | Count: {counter_moving.counts[*obj_moving_tuple]} | Buffer size: {buffer.size} | Uniqueness: {buffer.ratio_unique_trans:.4f}')
-
+        if (dqn_val - rms_dqn.avg >= alpha * rms_dqn.std and not record) or np.random.random() < eps: # swap to record mode 
             switches += 1 
             heatmap_swap[current_context, agent_pos[0], agent_pos[1]] += 1
             record = True
             target_pos = goal_pos
             switch_state_history.append((step, current_context, *agent_pos))
             action = goal_action
-                 
-        elif np.array_equal(agent_pos, aux_pos) and not record and not alt_explore: 
-            target_pos = goal_pos
-        elif num_expl >= explore_steps:
-            target_pos = goal_pos
-         
         
         obs_prime, reward, terminated, truncated, _ = env.step(action)
         done = terminated or truncated
@@ -184,7 +169,6 @@ def train_dqn_count(
         rms_norms.update(norm)
         
         if step < warmupsteps or record:
-            assert np.array_equal(target_pos, goal_pos) 
             # print(f'Timestep: {step} | Context: {current_context} | State: {agent_pos} | Dir: {state[2]} | Switch Count: {heatmap_swap[current_context, *agent_pos]} | Uncert: {uncertainty:.4f} | Count: {counter_moving.counts[*obj_moving_tuple]}')
             q = state_to_q[State(state=obs)]
             q_next = state_to_q[State(state=obs_prime)] if not done else placeholder
@@ -207,12 +191,13 @@ def train_dqn_count(
             items_added += 1
 
         if render and step >= num_timesteps - 1000:
-            env.get_wrapper_attr('set_aux')(aux_pos) # cannot add beforehand or else included in obs
-            agent_col = (255, 0, 0) if np.array_equal(target_pos, goal_pos) else (0, 0, 255) 
-            
+            env.get_wrapper_attr('set_aux')(aux_pos) if aux_pos else None
+            agent_col = (255, 0, 0) if record else (0, 0, 255)
+            agent_col = (255, 165, 0) if failed_to_add else agent_col
+        
             imgs.append(env.unwrapped.render(highlight_mask=ep_highlight_mask[current_context], 
                                         colors=ep_colors[current_context], agent_col=agent_col))
-            env.get_wrapper_attr('remove_aux')(aux_pos)
+            env.get_wrapper_attr('remove_aux')(aux_pos) if aux_pos else None
             
         obs = obs_prime
         
@@ -227,24 +212,17 @@ def train_dqn_count(
             done = False
             state = obs_to_state(obs)
             goal_pos = state[3:5]
-            
-            max_k = len(env.get_wrapper_attr('valid_pos'))
-            k = np.random.randint(low=0, high=max_k)
-            aux_pos = env.get_wrapper_attr('valid_pos')[k]
-            
-            paths = find_all_shortest_paths(state[:2], state[2], aux_pos, state[5:], size)
-            path_index = np.random.randint(low=0, high=len(paths))
-            actions = compute_actions(paths[path_index])
 
             current_context = env.get_wrapper_attr('context')
-            start_state, _, _ = env.get_wrapper_attr('context_info')(current_context)
-            walls = env.get_wrapper_attr('walls')()
             record = False
             trajs_added += 1
             
-            num_expl = 0
-            explore_steps = np.random.randint(low=1, high=K)
+            actions, path = aux_pos_random_path(state, env)
+            aux_pos = (path[-1][0], path[-1][1])
+            failed_to_add = False
             
+            max_k = len(env.get_wrapper_attr('valid_pos'))
+            k = np.random.randint(low=0, high=max_k)
             if step < warmupsteps:
                 target_pos = goal_pos # goal state
                 env.get_wrapper_attr('move_valid_pos')(k)
@@ -292,7 +270,8 @@ def train_dqn_count(
         'context_history': contexts,
         'running_mean': rms_dqn,
         'running_mean_un': rms_un,
-        'running_mean_norms': rms_norms
+        'running_mean_norms': rms_norms,
+        'buffer': buffer
     }
     
 if __name__ == '__main__':

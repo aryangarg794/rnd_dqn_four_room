@@ -54,9 +54,10 @@ class MovingCountBasedUncertainty:
             self.counts = np.zeros((200, 19, 19))
         self.device = device
         self.size = 0
-        self.eps = 1e-6
+        self.eps = 1e-1
         self.return_ones = return_ones
         self.dir = dir
+        self.max_val = 1 if return_ones else 1/(np.sqrt(0) + self.eps)
     
     def __getitem__(self, state_repr: tuple):
         if self.return_ones:
@@ -86,6 +87,9 @@ class MovingCountBasedUncertainty:
         
         return batch_rewards.unsqueeze(dim=-1), torch_ind
 
+    @property
+    def counts_no_dir(self):
+        return self.counts.sum(axis=-1) if self.dir else self.counts
 
 if __name__ == "__main__":
     import numpy as np

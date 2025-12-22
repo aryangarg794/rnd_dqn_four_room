@@ -218,6 +218,7 @@ class ReplayBuffer:
         self.trans = deque(maxlen=self.capacity)
         self.unique_trans = MovingSet(capacity=capacity)
         self.obs = MovingSet(capacity=capacity)
+        self.seen_obs = deque(maxlen=self.capacity)
 
     def update(
         self, 
@@ -277,6 +278,7 @@ class ReplayBuffer:
     def update_seen(self, obj: tuple): 
         self.obs.add(obj)
         self.counts[*obj] += 1
+        self.seen_obs.append(obj)
     
     def has(self, obj: tuple):
         if self.counts[*obj] > 0:

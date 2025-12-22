@@ -138,6 +138,14 @@ def find_all_shortest_paths(agent_pos, agent_dir, goal_pos, topology, size):
 
     return shortest_paths
 
+
+def find_simple_paths(agent_pos, agent_dir, goal_pos, topology, size):
+    graph = create_maze_graph(topology, size)
+    
+
+    
+    
+
 def find_all_action_values(agent_pos, agent_dir, goal_pos, topology, gamma, size):
     """
         We will derive the action values (Q values) by enumerating all the actions and finding the state value

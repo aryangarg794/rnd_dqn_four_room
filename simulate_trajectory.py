@@ -48,14 +48,11 @@ def simulate_trajectory(file_name: str, alpha: float = 1.0, device: str = 'cuda'
     explore_map = results['explore_heatmap']
     switch_map = results['heatmap']
     
-    agent = DQN(env, deepcopy(env), device=device)
+    agent = DQN(env, deepcopy(env), hidden_layers=[128, 512, 512, 128], device=device)
     
-    random_context = 199
+    random_context = np.random.randint(0, 199)
     env.get_wrapper_attr('set_context')(random_context)
     obs, _ = env.reset()
-    
-    print(env.get_wrapper_attr('context'), random_context)
-    
     if optimal:
         dqn_scores, _, dqn_scores_dirs = get_q_optimal(counter, random_context, 0, 0.99)
     else:
@@ -82,6 +79,7 @@ def simulate_trajectory(file_name: str, alpha: float = 1.0, device: str = 'cuda'
     target_pos = aux_pos
     record = False
     step = timesteps
+    current_step = 0
     
     images = []
     ep_highlight_mask = np.zeros((env.get_wrapper_attr('width'), env.get_wrapper_attr('height')), dtype=bool)
@@ -235,6 +233,9 @@ def simulate_trajectory(file_name: str, alpha: float = 1.0, device: str = 'cuda'
         obs = obs_prime
         done = terminated or truncated
         plt.close(fig)
+        
+        print(f'Step {current_step}: {"Exploring..." if not record else "Recording..."}', end='\r')
+        current_step += 1
 
     first_frame = images[0]
     height, width, _ = first_frame.shape

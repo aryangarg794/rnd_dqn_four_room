@@ -16,26 +16,12 @@ from collections import deque
 from four_room.env import FourRoomsEnv
 from four_room.utils import obs_to_state
 from four_room.wrappers import gym_wrapper
-from four_room.shortest_path import find_all_shortest_paths
 from four_room.constants import train_config, val_config, test_config, size, state_to_q
 from dqn_experiments.regression_exp_utils import run_experiment
 from rnd_exploration.dataset import ReplayBuffer, State
+from utils.exploration import explorego_exploration, explorego_multiple
 
 gym.register('MiniGrid-FourRooms-v1', FourRoomsEnv)
-
-def sanitize_state(state):
-    return (int(state[0]), int(state[1]), int(state[2]))
-    
-def sanitize_path(path: list):
-    return [sanitize_state(state) for state in path]
-
-def remove_goal(goal, path):
-    path = sanitize_path(path)
-    for i in range(4):
-        goal_pos = (int(goal[0]), int(goal[1]), i)
-        if goal_pos in path:
-            path.remove(goal_pos)
-    return path
     
 @dataclass
 class Args:
@@ -84,22 +70,14 @@ def train_explorego(
     state = obs_to_state(obs)
     goal_pos = state[3:5]
     
-    max_k = len(env.get_wrapper_attr('valid_pos'))
-    k = np.random.randint(low=0, high=max_k)
-    aux_pos = env.get_wrapper_attr('valid_pos')[k]
-    paths = find_all_shortest_paths(state[:2], state[2], aux_pos, state[5:], size)
-    path_index = np.random.randint(low=0, high=len(paths))
-    path = paths[path_index]
-    path = remove_goal(goal_pos, path)
-    path_k = np.random.randint(low=0, high=len(path))
-    move_state = path[path_k]
-    env.get_wrapper_attr('move_state')(move_state)
     target_pos = state[3:5]
     
     ep_highlight_mask = np.zeros((len(train_config['agent positions']), 
                                         env.get_wrapper_attr('width'), env.get_wrapper_attr('height')), dtype=bool)
     ep_colors = np.empty_like(ep_highlight_mask, dtype=object)
     
+    move_state = explorego_multiple(state, env)
+    env.get_wrapper_attr('move_state')(move_state)
     current_context = env.unwrapped.context
     past_pos = []
     visit_history = deque(maxlen=args.capacity+1)
@@ -132,12 +110,12 @@ def train_explorego(
             items_added += 1
             
         if render and step >= num_timesteps - 1000:
-            env.get_wrapper_attr('set_aux')(aux_pos) # cannot add beforehand or else included in obs
+            # env.get_wrapper_attr('set_aux')(aux_pos) # cannot add beforehand or else included in obs
             agent_col = (255, 0, 0) if np.array_equal(target_pos, goal_pos) else (0, 0, 255) 
             
             imgs.append(env.unwrapped.render(highlight_mask=ep_highlight_mask[current_context], 
                                         colors=ep_colors[current_context], agent_col=agent_col))
-            env.get_wrapper_attr('remove_aux')(aux_pos)
+            # env.get_wrapper_attr('remove_aux')(aux_pos)
             
         obs = obs_prime
         
@@ -153,15 +131,7 @@ def train_explorego(
             state = obs_to_state(obs)
             goal_pos = state[3:5]
             
-            max_k = len(env.get_wrapper_attr('valid_pos'))
-            k = np.random.randint(low=0, high=max_k)
-            aux_pos = env.get_wrapper_attr('valid_pos')[k]
-            paths = find_all_shortest_paths(state[:2], state[2], aux_pos, state[5:], size)
-            path_index = np.random.randint(low=0, high=len(paths))
-            path = paths[path_index]
-            path = remove_goal(goal_pos, path)
-            path_k = np.random.randint(low=0, high=len(path))
-            move_state = path[path_k]
+            move_state = explorego_multiple(state, env)
             env.get_wrapper_attr('move_state')(move_state)
             target_pos = state[3:5]
                 
@@ -196,7 +166,7 @@ def train_explorego(
 if __name__ == '__main__':
     
     parser = argparse.ArgumentParser()
-    parser.add_argument('-t', '--timesteps', type=int, default=int(1e6), help='timesteps')
+    parser.add_argument('-t', '--timesteps', type=int, default=int(3e5), help='timesteps')
     parser.add_argument('-f', '--dir', type=str, default='basic_rnd', help='save name')
     parser.add_argument('-d', '--device', type=str, default='cuda', help='device')
     parser.add_argument('-r', '--render', action='store_true', help='render mode')
