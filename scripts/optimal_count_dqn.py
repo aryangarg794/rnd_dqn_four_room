@@ -49,12 +49,11 @@ def train_dqn_count(
     seed: int = 0,
     alpha: float = 1.5, 
     window: int = 3500, 
-    warmupsteps: int = 0,
     render: bool = False,
     debug: bool = False,
     return_ones: bool = False,
     alt_explore: bool = False, 
-    eps: float = 0.0, 
+    eps: float = 0.05, 
 ): 
     rms_dqn = RunningAverage(window_size=window)
     rms_un = RunningAverage(window_size=window)
@@ -94,12 +93,7 @@ def train_dqn_count(
     target_pos = state[3:5] # first phase is warmup
     aux_pos = None
     
-    max_k = len(env.get_wrapper_attr('valid_pos'))
-    k = np.random.randint(low=0, high=max_k)
-    if warmupsteps > 0:
-        env.get_wrapper_attr('move_valid_pos')(k)
-    
-    actions, path = aux_pos_random_path(state, env)
+    actions, path = aux_pos_multiple(state, env)
     aux_pos = (path[-1][0], path[-1][1])
     
     ep_highlight_mask = np.zeros((len(train_config['agent positions']), 
@@ -148,13 +142,14 @@ def train_dqn_count(
             
         norm = (dqn_val - rms_dqn.avg)/rms_dqn.std
         
-        if (dqn_val - rms_dqn.avg >= alpha * rms_dqn.std and not record) or np.random.random() < eps: # swap to record mode 
+        if (dqn_val - rms_dqn.avg >= alpha * rms_dqn.std or np.random.random() < eps) and not record: # swap to record mode 
             switches += 1 
             heatmap_swap[current_context, agent_pos[0], agent_pos[1]] += 1
             record = True
             target_pos = goal_pos
             switch_state_history.append((step, current_context, *agent_pos))
             action = goal_action
+            q = state_to_q[State(state=obs)]
         
         obs_prime, reward, terminated, truncated, _ = env.step(action)
         done = terminated or truncated
@@ -168,7 +163,7 @@ def train_dqn_count(
         rms_dqn.update(dqn_val)
         rms_norms.update(norm)
         
-        if step < warmupsteps or record:
+        if record:
             # print(f'Timestep: {step} | Context: {current_context} | State: {agent_pos} | Dir: {state[2]} | Switch Count: {heatmap_swap[current_context, *agent_pos]} | Uncert: {uncertainty:.4f} | Count: {counter_moving.counts[*obj_moving_tuple]}')
             q = state_to_q[State(state=obs)]
             q_next = state_to_q[State(state=obs_prime)] if not done else placeholder
@@ -223,13 +218,8 @@ def train_dqn_count(
             
             max_k = len(env.get_wrapper_attr('valid_pos'))
             k = np.random.randint(low=0, high=max_k)
-            if step < warmupsteps:
-                target_pos = goal_pos # goal state
-                env.get_wrapper_attr('move_valid_pos')(k)
-            else: 
-                target_pos = aux_pos
+            target_pos = aux_pos
 
-        
         if step % regression_freq == 0 and buffer.size >= buffer.capacity:
             lc, test_score = run_experiment(buffer, device=args.device)
             learning_curves.append(lc)
@@ -290,6 +280,7 @@ if __name__ == '__main__':
     parser.add_argument('--debug', action='store_true', help='debug mode')
     parser.add_argument('--return_ones', action='store_true', help='return ones')
     parser.add_argument('--alt', action='store_true', help='alt_explore')
+    parser.add_argument('-e', '--eps', type=float, default=0.05, help='eps')
     
     args = parser.parse_args()
     
@@ -348,7 +339,8 @@ if __name__ == '__main__':
         debug=args.debug,
         window=args.window,
         return_ones=args.return_ones,
-        alt_explore=args.alt
+        alt_explore=args.alt,
+        eps=args.eps
     )
     
     with open(f'results/dqn_exps/{args.dir}_seed_{args.seed}_{args.timesteps}.pl', 'wb') as file:

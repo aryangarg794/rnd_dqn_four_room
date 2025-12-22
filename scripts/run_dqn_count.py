@@ -24,6 +24,7 @@ from rnd_exploration.dataset import State, Transition
 from dqn_experiments.regression_exp_utils import run_experiment
 from dqn.model import DQN
 from dqn.counter import CountBasedUncertainty, MovingCountBasedUncertainty
+from utils.exploration import aux_pos_multiple
 
 gym.register('MiniGrid-FourRooms-v1', FourRoomsEnv)
 
@@ -94,7 +95,9 @@ def train_dqn_count(
     render: bool = False,
     debug: bool = False,
     return_ones: bool = True,
-    last_episode_len: int = 20
+    last_episode_len: int = 30,
+    eps: float = 0.05,
+    inlcude_expl_state: bool = False
 ): 
     rms_dqn = RunningAverage(window_size=window)
     rms_un = RunningAverage(window_size=window)
@@ -127,7 +130,6 @@ def train_dqn_count(
     )
     
     counter_moving = MovingCountBasedUncertainty(capacity=args.capacity, return_ones=return_ones, device=args.device)
-    print(return_ones)
     counter_full = CountBasedUncertainty(capacity=args.capacity)
 
     env = deepcopy(args.env)
@@ -138,16 +140,15 @@ def train_dqn_count(
     state = obs_to_state(obs)
     goal_pos = state[3:5]
     target_pos = state[3:5] # first phase is warmup
+    aux_pos = None
     
     max_k = len(env.get_wrapper_attr('valid_pos'))
     k = np.random.randint(low=0, high=max_k)
-    aux_pos = env.get_wrapper_attr('valid_pos')[k]
     if warmupsteps > 0:
         env.get_wrapper_attr('move_valid_pos')(k)
     
-    paths = find_all_shortest_paths(state[:2], state[2], aux_pos, state[5:], size)
-    path_index = np.random.randint(low=0, high=len(paths))
-    actions = compute_actions(paths[path_index])
+    actions, path = aux_pos_multiple(state, env)
+    aux_pos = (path[-1][0], path[-1][1])
     
     ep_highlight_mask = np.zeros((len(train_config['agent positions']), 
                                         env.get_wrapper_attr('width'), env.get_wrapper_attr('height')), dtype=bool)
@@ -180,8 +181,10 @@ def train_dqn_count(
         contexts.append(current_context)
         agent_pos = env.get_wrapper_attr('agent_pos')
         
-        if np.array_equal(target_pos, aux_pos) and not np.array_equal(agent_pos, aux_pos):
+        if len(actions) != 0 and not record and step >= warmupsteps:
             action = actions.pop(0)
+        elif np.random.random() < eps: 
+            action = np.random.randint(low=0, high=3)
         else:
             q = state_to_q[State(state=obs)]
             action = q.argmax() if isinstance(q, np.ndarray) else np.array(q).argmax()
@@ -193,24 +196,20 @@ def train_dqn_count(
             obj_tuple = (*obj_tuple, current_context)
             obj_moving_tuple = (current_context, *agent_pos, state[2])
             uncertainty = counter_moving[*obj_moving_tuple]
+            q = state_to_q[State(state=obs)]
             
         norm = (dqn_val - rms_dqn.avg)/rms_dqn.std
         
-        if dqn_val - rms_dqn.avg >= alpha * rms_dqn.std and not record: # swap to record mode 
-        # elif np.array_equal(agent_pos_after, aux_pos):
-        
-            # if np.array_equal(start_state, agent_pos):  
-            #     print(f'Timestep: {step} | Normalized: {norm:.4f} | Context: {current_context} | Dir: {state[2]} | Switch Count: {heatmap_swap[current_context, *start_state]} | Uncert: {uncertainty:.4f} | In: {agent.buffer.has(obj_moving_tuple)} | Count: {counter_moving.counts[*obj_moving_tuple]} | Buffer size: {agent.buffer.size} | Uniqueness: {agent.buffer.ratio_unique_trans:.4f}')
-
+        if (dqn_val - rms_dqn.avg >= alpha * rms_dqn.std or np.random.random() < eps) and not record: # swap to record mode 
+            if step < warmupsteps:
+                continue
             switches += 1 
             heatmap_swap[current_context, agent_pos[0], agent_pos[1]] += 1
             record = True
             target_pos = goal_pos
             switch_state_history.append((step, current_context, *agent_pos))
             action = goal_action
-                 
-        elif np.array_equal(agent_pos, aux_pos) and not record: 
-            target_pos = goal_pos
+            
         
         obs_prime, reward, terminated, truncated, _ = env.step(action)
         done = terminated or truncated
@@ -252,12 +251,12 @@ def train_dqn_count(
         
         
         if render and step >= num_timesteps - 1000:
-            env.get_wrapper_attr('set_aux')(aux_pos) # cannot add beforehand or else included in obs
+            env.get_wrapper_attr('set_aux')(aux_pos) if aux_pos else None
             agent_col = (255, 0, 0) if np.array_equal(target_pos, goal_pos) else (0, 0, 255) 
             
             imgs.append(env.unwrapped.render(highlight_mask=ep_highlight_mask[current_context], 
                                         colors=ep_colors[current_context], agent_col=agent_col))
-            env.get_wrapper_attr('remove_aux')(aux_pos)
+            env.get_wrapper_attr('remove_aux')(aux_pos) if aux_pos else None
             
         obs = obs_prime
         
@@ -382,6 +381,8 @@ if __name__ == '__main__':
     parser.add_argument('-tau', '--tau', type=float, default=0.005, help='tau')
     parser.add_argument('--debug', action='store_true', help='debug mode')
     parser.add_argument('--return_ones', action='store_true', help='return ones')
+    parser.add_argument('-e', '--eps', type=float, default=0.05, help='eps')
+    parser.add_argument('--last_ep', type=int, default=10, help='window size of last_ep')
     
     args = parser.parse_args()
     
@@ -442,7 +443,9 @@ if __name__ == '__main__':
         render=args.render,
         debug=args.debug,
         window=args.window,
-        return_ones=args.return_ones
+        return_ones=args.return_ones,
+        eps=args.eps,
+        last_episode_len=args.last_ep
     )
     
     torch.save(agent.net.state_dict(), f'results/models/{args.dir}_seed_{args.seed}_{args.timesteps}.pt')
