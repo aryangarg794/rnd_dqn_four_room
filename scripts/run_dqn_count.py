@@ -200,9 +200,7 @@ def train_dqn_count(
             
         norm = (dqn_val - rms_dqn.avg)/rms_dqn.std
         
-        if (dqn_val - rms_dqn.avg >= alpha * rms_dqn.std or np.random.random() < eps) and not record: # swap to record mode 
-            if step < warmupsteps:
-                continue
+        if (dqn_val - rms_dqn.avg >= alpha * rms_dqn.std or np.random.random() < eps) and not record and step >= warmupsteps: # swap to record mode 
             switches += 1 
             heatmap_swap[current_context, agent_pos[0], agent_pos[1]] += 1
             record = True
@@ -225,7 +223,6 @@ def train_dqn_count(
         
         if step < warmupsteps or record:
             assert np.array_equal(target_pos, goal_pos) 
-            
             # print(f'Timestep: {step} | Context: {current_context} | State: {agent_pos} | Dir: {state[2]} | Switch Count: {heatmap_swap[current_context, *agent_pos]} | Uncert: {uncertainty:.4f} | Count: {counter_moving.counts[*obj_moving_tuple]}')
             q_next = state_to_q[State(state=obs_prime)] if not done else placeholder
             next_action = q_next.argmax()
@@ -343,8 +340,8 @@ def train_dqn_count(
         
         uniqueness.append(agent.buffer.ratio_unique_trans)
         value = (dqn_val - rms_dqn.avg)/rms_dqn.std  
-        pbar.set_description(f"Training RND DQN | Uniqueness: {agent.buffer.ratio_unique_trans:.4f} | Last Regression Exp: {(scores[-1] if len(scores) > 0 else 0):.4f} | Total Items added: {items_added} | Current Context: {current_context} | RND Val: {dqn_val:.4f} | Avg: {rms_dqn.avg:.4f} | STD: {rms_dqn.std:.4f} | Switches: {switches} | Value: {value:.4f}")
-        # pbar.set_description(f"Training RND Count | Uniqueness: {agent.buffer.ratio_unique_trans:.4f} | Regression Exp: {(scores[-1] if len(scores) > 0 else 0):.4f} | Items added: {items_added} | Context: {current_context}")
+        # pbar.set_description(f"Training RND DQN | Uniqueness: {agent.buffer.ratio_unique_trans:.4f} | Last Regression Exp: {(scores[-1] if len(scores) > 0 else 0):.4f} | Total Items added: {items_added} | Current Context: {current_context} | RND Val: {dqn_val:.4f} | Avg: {rms_dqn.avg:.4f} | STD: {rms_dqn.std:.4f} | Switches: {switches} | Value: {value:.4f}")
+        pbar.set_description(f"Training RND Count | Uniqueness: {agent.buffer.ratio_unique_trans:.4f} | Regression Exp: {(scores[-1] if len(scores) > 0 else 0):.4f} | Items added: {items_added} | Context: {current_context}")
     
     return {
         'lc_curves': learning_curves, 
