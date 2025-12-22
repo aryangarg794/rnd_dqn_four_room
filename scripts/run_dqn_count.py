@@ -296,13 +296,8 @@ def train_dqn_count(
             state = obs_to_state(obs)
             goal_pos = state[3:5]
             
-            max_k = len(env.get_wrapper_attr('valid_pos'))
-            k = np.random.randint(low=0, high=max_k)
-            aux_pos = env.get_wrapper_attr('valid_pos')[k]
-            
-            paths = find_all_shortest_paths(state[:2], state[2], aux_pos, state[5:], size)
-            path_index = np.random.randint(low=0, high=len(paths))
-            actions = compute_actions(paths[path_index])
+            actions, path = aux_pos_multiple(state, env)
+            aux_pos = (path[-1][0], path[-1][1])
 
             current_context = env.get_wrapper_attr('context')
             start_state, _, _ = env.get_wrapper_attr('context_info')(current_context)
@@ -367,7 +362,7 @@ if __name__ == '__main__':
     parser.add_argument('-t', '--timesteps', type=int, default=int(3e5), help='timesteps')
     parser.add_argument('-f', '--dir', type=str, default='dqn_count_test', help='save name')
     parser.add_argument('-a', '--alpha', type=float, default=1.0, help='alpha')
-    parser.add_argument('-ag', '--lr_agent', type=float, default=1e-3, help='lr for dqn agent')
+    parser.add_argument('-ag', '--lr_agent', type=float, default=1e-4, help='lr for dqn agent')
     parser.add_argument('-d', '--device', type=str, default='cuda', help='device')
     parser.add_argument('-r', '--render', action='store_true', help='render mode')
     parser.add_argument('-s', '--replaysize', type=int, default=int(1e5), help='size of replay buffer')
