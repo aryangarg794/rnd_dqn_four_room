@@ -90,7 +90,7 @@ def train_dqn_count(
     seed: int = 0,
     alpha: float = 1.5, 
     window: int = 2500, 
-    warmupsteps: int = 0,
+    warmupsteps: int = 3500,
     gradient_steps: int = 3,
     render: bool = False,
     debug: bool = False,
@@ -145,7 +145,6 @@ def train_dqn_count(
     mode = False
     if np.random.random() < eps_mode and warmupsteps > 0:
         mode = True # true = explorego, false = our heuristic version
-        record = True
     
     max_k = len(env.get_wrapper_attr('valid_pos'))
     k = np.random.randint(low=0, high=max_k)
@@ -153,12 +152,13 @@ def train_dqn_count(
         env.get_wrapper_attr('move_valid_pos')(k)
     
     actions, path = aux_pos_multiple(state, env)
+    aux_pos = (path[-1][0], path[-1][1])
     if mode:
         k = np.random.randint(low=0, high=len(path))
         rand_state = path[k]
         env.get_wrapper_attr('move_state')(rand_state)
-        
-    aux_pos = (path[-1][0], path[-1][1])
+        target_pos = goal_pos
+        record = True
     
     ep_highlight_mask = np.zeros((len(train_config['agent positions']), 
                                         env.get_wrapper_attr('width'), env.get_wrapper_attr('height')), dtype=bool)
@@ -222,7 +222,6 @@ def train_dqn_count(
         obs_prime, reward, terminated, truncated, _ = env.step(action)
         done = terminated or truncated
         
-        
         if not record:
             explore_heatmap[current_context, agent_pos[0], agent_pos[1]] += 1
         
@@ -254,6 +253,8 @@ def train_dqn_count(
             last_ep.update(obs, action, obs_prime, next_action, int(done), obj_moving_tuple)
             items_added += 1
         else:
+            q_next = state_to_q[State(state=obs_prime)] if not done else placeholder
+            next_action = q_next.argmax()
             last_expl_ep.update(obs, action, obs_prime, next_action, int(done), obj_moving_tuple)
         
         
@@ -266,6 +267,7 @@ def train_dqn_count(
             env.get_wrapper_attr('remove_aux')(aux_pos) if aux_pos else None
             
         obs = obs_prime
+        
         
         for _ in range(gradient_steps): 
             batch_rewards, ind = counter_moving.sample(batch_size=batch_size)
@@ -310,15 +312,18 @@ def train_dqn_count(
             record = False
             if np.random.random() < eps_mode and warmupsteps > 0:
                 mode = True # true = explorego, false = our heuristic version
-                record = True
+                
             
             actions, path = aux_pos_multiple(state, env)
+            aux_pos = (path[-1][0], path[-1][1])
+            target_pos = aux_pos
             if mode:
                 k = np.random.randint(low=0, high=len(path))
                 rand_state = path[k]
                 env.get_wrapper_attr('move_state')(rand_state)
-            aux_pos = (path[-1][0], path[-1][1])
-
+                target_pos = goal_pos
+                record = True
+            
             current_context = env.get_wrapper_attr('context')
             start_state, _, _ = env.get_wrapper_attr('context_info')(current_context)
             trajs_added += 1
@@ -326,8 +331,6 @@ def train_dqn_count(
             if step < warmupsteps:
                 target_pos = goal_pos # goal state
                 env.get_wrapper_attr('move_valid_pos')(k)
-            else: 
-                target_pos = aux_pos
 
         agent.soft_update()
         
@@ -378,7 +381,7 @@ if __name__ == '__main__':
     
     
     parser = argparse.ArgumentParser()
-    parser.add_argument('-t', '--timesteps', type=int, default=int(3e5), help='timesteps')
+    parser.add_argument('-t', '--timesteps', type=int, default=int(4e5), help='timesteps')
     parser.add_argument('-f', '--dir', type=str, default='comb_test', help='save name')
     parser.add_argument('-a', '--alpha', type=float, default=1.0, help='alpha')
     parser.add_argument('-ag', '--lr_agent', type=float, default=1e-4, help='lr for dqn agent')

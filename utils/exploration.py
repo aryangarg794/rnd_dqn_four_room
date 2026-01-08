@@ -20,6 +20,11 @@ def remove_goal(goal, path):
             path.remove(goal_pos)
     return path
 
+def truncate_goal_path(goal, path):
+    for d in range(4):
+        dir_goal = (goal[0], goal[1], d)
+        path = path[:path.index(dir_goal)] if dir_goal in path else path
+    return path
 
 def remove_blacklisted(blacklist, nodes):
     nodes = sanitize_path(nodes)
@@ -116,6 +121,8 @@ def aux_pos_multiple(state, env, num_jumps=4, distance=7):
         desc_actions, path = find_shortest_path(graph, aux_poses[jump-1], rand_desc)
         actions.extend(desc_actions)
         full_path.extend(path)
+        
+    full_path = truncate_goal_path(state[3:5], path)
         
     return actions, full_path
         
