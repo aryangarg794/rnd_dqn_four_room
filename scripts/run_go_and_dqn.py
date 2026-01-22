@@ -79,19 +79,18 @@ class LastEpisode:
             self.dones[:self.size]
         )
 
-
 def train_dqn_count(
     args: Args, 
     batch_size: int = 512, 
     gamma: float = 0.99, 
     num_timesteps: int = int(2e5), 
-    grad_norm: float = 1.0,
+    grad_norm: float = 10.0,
     regression_freq: int = 50000,
     seed: int = 0,
     alpha: float = 1.5, 
     window: int = 2500, 
     warmupsteps: int = 3500,
-    gradient_steps: int = 3,
+    gradient_steps: int = 5,
     render: bool = False,
     debug: bool = False,
     return_ones: bool = True,
@@ -126,7 +125,9 @@ def train_dqn_count(
         lr=args.lr_agent,
         device=args.device,
         use_cnn=args.use_cnn,
-        hidden_layers=[128, 512, 512, 128]
+        cnn_features=1024,
+        hidden_layers=[1024, 2048, 1024],
+        residual=True
     )
     
     counter_moving = MovingCountBasedUncertainty(capacity=args.capacity, return_ones=return_ones, device=args.device)
@@ -143,12 +144,12 @@ def train_dqn_count(
     aux_pos = None
     
     mode = False
-    if np.random.random() < eps_mode and warmupsteps > 0:
+    if np.random.random() < eps_mode or warmupsteps > 0:
         mode = True # true = explorego, false = our heuristic version
-    
-    max_k = len(env.get_wrapper_attr('valid_pos'))
-    k = np.random.randint(low=0, high=max_k)
+
     if warmupsteps > 0:
+        max_k = len(env.get_wrapper_attr('valid_pos'))
+        k = np.random.randint(low=0, high=max_k)
         env.get_wrapper_attr('move_valid_pos')(k)
     
     actions, path = aux_pos_multiple(state, env)
@@ -175,7 +176,7 @@ def train_dqn_count(
     start_state, _, _ = env.get_wrapper_attr('context_info')(current_context)
     past_pos = []
     visit_history = deque(maxlen=args.capacity+1)
-    placeholder = np.array([1.0, 0.0, 0.0])
+    placeholder = np.array([0.0, 0.0, 0.0])
     
     switches = 0 
     trajs_added = 0
@@ -268,13 +269,12 @@ def train_dqn_count(
             
         obs = obs_prime
         
-        
         for _ in range(gradient_steps): 
             batch_rewards, ind = counter_moving.sample(batch_size=batch_size)
             batch_obs, batch_actions, _, batch_primes, batch_next_actions, batch_dones = agent.buffer.sample_index(ind)
             last_obs, last_action, last_rewards, last_obs_primes, last_next_actions, last_dones = last_ep.get(counter_moving)            
             (last_obs_expl, last_action_expl, last_rewards_expl, 
-             last_obs_primes_expl, last_next_actions_expl, last_dones_expl) = last_ep.get(counter_moving) 
+             last_obs_primes_expl, last_next_actions_expl, last_dones_expl) = last_expl_ep.get(counter_moving) 
             
             batch_obs = torch.cat([batch_obs, last_obs, last_obs_expl], dim=0)
             batch_actions = torch.cat([batch_actions, last_action, last_action_expl], dim=0)
@@ -310,9 +310,8 @@ def train_dqn_count(
             
             mode = False
             record = False
-            if np.random.random() < eps_mode and warmupsteps > 0:
+            if np.random.random() < eps_mode or step < warmupsteps:
                 mode = True # true = explorego, false = our heuristic version
-                
             
             actions, path = aux_pos_multiple(state, env)
             aux_pos = (path[-1][0], path[-1][1])
@@ -329,6 +328,8 @@ def train_dqn_count(
             trajs_added += 1
             
             if step < warmupsteps:
+                max_k = len(env.get_wrapper_attr('valid_pos'))
+                k = np.random.randint(low=0, high=max_k)
                 target_pos = goal_pos # goal state
                 env.get_wrapper_attr('move_valid_pos')(k)
 
@@ -358,7 +359,7 @@ def train_dqn_count(
         uniqueness.append(agent.buffer.ratio_unique_trans)
         value = (dqn_val - rms_dqn.avg)/rms_dqn.std  
         # pbar.set_description(f"Training RND DQN | Uniqueness: {agent.buffer.ratio_unique_trans:.4f} | Last Regression Exp: {(scores[-1] if len(scores) > 0 else 0):.4f} | Total Items added: {items_added} | Current Context: {current_context} | RND Val: {dqn_val:.4f} | Avg: {rms_dqn.avg:.4f} | STD: {rms_dqn.std:.4f} | Switches: {switches} | Value: {value:.4f}")
-        pbar.set_description(f"Training RND Count | Uniqueness: {agent.buffer.ratio_unique_trans:.4f} | Regression Exp: {(scores[-1] if len(scores) > 0 else 0):.4f} | Items added: {items_added} | Context: {current_context}")
+        pbar.set_description(f"Training RND Count | Uniqueness: {agent.buffer.ratio_unique_trans:.4f} | Items added: {items_added} | Context: {current_context}")
     
     return {
         'lc_curves': learning_curves, 
@@ -381,10 +382,10 @@ if __name__ == '__main__':
     
     
     parser = argparse.ArgumentParser()
-    parser.add_argument('-t', '--timesteps', type=int, default=int(4e5), help='timesteps')
+    parser.add_argument('-t', '--timesteps', type=int, default=int(3e5), help='timesteps')
     parser.add_argument('-f', '--dir', type=str, default='comb_test', help='save name')
-    parser.add_argument('-a', '--alpha', type=float, default=1.0, help='alpha')
-    parser.add_argument('-ag', '--lr_agent', type=float, default=1e-4, help='lr for dqn agent')
+    parser.add_argument('-a', '--alpha', type=float, default=1.5, help='alpha')
+    parser.add_argument('-ag', '--lr_agent', type=float, default=1e-3, help='lr for dqn agent')
     parser.add_argument('-d', '--device', type=str, default='cuda', help='device')
     parser.add_argument('-r', '--render', action='store_true', help='render mode')
     parser.add_argument('-s', '--replaysize', type=int, default=int(1e5), help='size of replay buffer')
@@ -392,12 +393,13 @@ if __name__ == '__main__':
     parser.add_argument('-b', '--batch_size', type=int, default=256, help='batch size')
     parser.add_argument('-fr', '--freq', type=int, default=int(1e5), help='freq of regression')
     parser.add_argument('--window', type=int, default=3500, help='window size of rms_dqn')
-    parser.add_argument('-tau', '--tau', type=float, default=0.005, help='tau')
+    parser.add_argument('-tau', '--tau', type=float, default=0.01, help='tau')
     parser.add_argument('--debug', action='store_true', help='debug mode')
     parser.add_argument('--return_ones', action='store_true', help='return ones')
     parser.add_argument('-ed', '--eps_dqn', type=float, default=0.05, help='eps dqn')
     parser.add_argument('-em', '--eps_mode', type=float, default=0.05, help='eps dqn')
     parser.add_argument('--last_ep', type=int, default=10, help='window size of last_ep')
+    parser.add_argument('--grad_steps', type=int, default=5, help='num of grad steps')
     
     args = parser.parse_args()
     
@@ -461,7 +463,8 @@ if __name__ == '__main__':
         return_ones=args.return_ones,
         eps_dqn=args.eps_dqn,
         eps_mode=args.eps_mode,
-        last_episode_len=args.last_ep
+        last_episode_len=args.last_ep,
+        gradient_steps=args.grad_steps
     )
     
     torch.save(agent.net.state_dict(), f'results/models/{args.dir}_seed_{args.seed}_{args.timesteps}.pt')

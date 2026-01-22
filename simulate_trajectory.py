@@ -48,7 +48,7 @@ def simulate_trajectory(file_name: str, alpha: float = 1.0, device: str = 'cuda'
     explore_map = results['explore_heatmap']
     switch_map = results['heatmap']
     
-    agent = DQN(env, deepcopy(env), hidden_layers=[128, 512, 512, 128], device=device)
+    agent = DQN(env, deepcopy(env), hidden_layers=[50, 50], device=device)
     
     random_context = np.random.randint(0, 199)
     env.get_wrapper_attr('set_context')(random_context)
@@ -111,12 +111,12 @@ def simulate_trajectory(file_name: str, alpha: float = 1.0, device: str = 'cuda'
             state_obj = State(state=obs)
             q = state_to_q[state_obj]
             action = q.argmax() if isinstance(q, np.ndarray) else np.array(q).argmax()
-
+            
+        goal_action = state_to_q[State(obs)].argmax()
         if optimal:
-            dqn_val = compute_q_value(obs, random_context, counter, 0.99)
+            dqn_val = compute_q_value(obs, random_context, counter, 0.99, goal_action)
             norm = (dqn_val - rms_dqn.avg)/rms_dqn.std 
         else:
-            goal_action = state_to_q[State(obs)].argmax()
             dqn_val = agent(obs_torch).squeeze()[goal_action].item()
         obj_tuple = tuple([int(item) for item in state])
             
@@ -127,6 +127,7 @@ def simulate_trajectory(file_name: str, alpha: float = 1.0, device: str = 'cuda'
             agent.buffer.update_seen(obj_tuple)
             record = True
             target_pos = goal_pos
+            action = goal_action
         
         elif np.array_equal(agent_pos, aux_pos) and not record: 
             target_pos = goal_pos

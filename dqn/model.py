@@ -18,6 +18,7 @@ class DQNModule(nn.Module):
         use_cnn: bool = True, 
         cnn_features: int = 512, 
         hidden_layers: list = [256, 256],
+        residual: bool = True, 
         *args,
         **kwargs
     ) -> None:
@@ -29,7 +30,7 @@ class DQNModule(nn.Module):
         
         if use_cnn:
             self.layers.extend([
-                CNN(observation_space=env.observation_space, features_dim=cnn_features),
+                CNN(observation_space=env.observation_space, features_dim=cnn_features, residual=residual),
                 nn.ReLU(),
             ])
         else:
@@ -50,7 +51,7 @@ class DQNModule(nn.Module):
             
         self.layers.append(nn.Linear(hidden_layers[-1], self.num_actions))
 
-        self.apply(self._init)
+        self.apply(self.orthogonal_layer_init)
 
     def _init(self, m):
       if isinstance(m, (nn.Linear)):
@@ -61,7 +62,11 @@ class DQNModule(nn.Module):
     def forward(self, x):
         return self.layers(x)
 
-    
+    def orthogonal_layer_init(layer, std=np.sqrt(2), bias_const=0.0):
+        if hasattr(layer, 'weight'):
+            torch.nn.init.orthogonal_(layer.weight, std)
+            torch.nn.init.constant_(layer.bias, bias_const)
+        return layer
         
 class DQN:
     
@@ -71,6 +76,7 @@ class DQN:
         val_env: gym.Env, 
         use_cnn: bool = True, 
         capacity: int = int(1e5),
+        cnn_features: int = 512, 
         start_epsilon: float = 0.99,
         max_decay: float = 0.1,
         decay_steps: float = 10000,
@@ -78,13 +84,16 @@ class DQN:
         tau: float = 0.005,
         hidden_layers: list = [256, 256],
         device: str = 'cuda', 
+        residual: bool = True, 
         *args, 
         **kwargs
     ):
         self.net = DQNModule(
             env=env, 
             use_cnn=use_cnn,
-            hidden_layers=hidden_layers
+            hidden_layers=hidden_layers,
+            cnn_features=cnn_features,
+            residual=residual
         ).to(device)
         
         self.target_net = deepcopy(self.net).to(device)
