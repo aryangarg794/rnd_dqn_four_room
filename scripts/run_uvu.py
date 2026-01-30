@@ -22,8 +22,7 @@ from rnd_exploration.utils import RunningAverage
 from four_room.constants import train_config, val_config, test_config, size
 from rnd_exploration.dataset import State, Transition
 from dqn_experiments.regression_exp_utils import run_experiment
-from dqn.model import DQN
-from dqn.counter import CountBasedUncertainty, MovingCountBasedUncertainty
+from uvu.uvu import UVU
 from utils.episode import LastEpisode
 from utils.exploration import aux_pos_multiple
 
@@ -43,7 +42,7 @@ class Args:
     device: str = 'cuda'
     
 
-def train_dqn_count(
+def train_uvu_count(
     args: Args, 
     batch_size: int = 512, 
     gamma: float = 0.99, 
@@ -81,7 +80,7 @@ def train_dqn_count(
     torch.cuda.manual_seed(seed)
     torch.cuda.manual_seed_all(seed)
     
-    agent = DQN(
+    agent = UVU(
         env=args.env,
         val_env=args.val_env,
         capacity=args.capacity,
@@ -89,13 +88,10 @@ def train_dqn_count(
         lr=args.lr_agent,
         device=args.device,
         use_cnn=args.use_cnn,
-        cnn_features=1024,
-        hidden_layers=[1024, 2048, 1024],
+        cnn_features=512,
+        hidden_layers=[512, 512, 512],
         residual=True
     )
-    
-    counter_moving = MovingCountBasedUncertainty(capacity=args.capacity, return_ones=return_ones, device=args.device)
-    counter_full = CountBasedUncertainty(capacity=args.capacity)
 
     env = deepcopy(args.env)
     items_added = 0
@@ -146,8 +142,6 @@ def train_dqn_count(
     trajs_added = 0
     contexts = []
     last_ep = LastEpisode(args.env.observation_space.shape, capacity=last_episode_len, device=args.device)
-    last_expl_ep = LastEpisode(args.env.observation_space.shape, capacity=last_episode_len, device=args.device)
-    
     
     for step in (pbar := tqdm(range(1, num_timesteps+1), disable=debug)): 
         
@@ -170,7 +164,7 @@ def train_dqn_count(
             obj_tuple = tuple([int(item) for item in state])
             obj_tuple = (*obj_tuple, current_context)
             obj_moving_tuple = (current_context, *agent_pos, state[2])
-            uncertainty = counter_moving[*obj_moving_tuple]
+
             q = state_to_q[State(state=obs)]
             
         norm = (dqn_val - rms_dqn.avg)/rms_dqn.std
@@ -191,7 +185,6 @@ def train_dqn_count(
             explore_heatmap[current_context, agent_pos[0], agent_pos[1]] += 1
         
         # if counter_moving.counts[*obj_moving_tuple] > 0:
-        rms_un.update(uncertainty)
         rms_dqn.update(dqn_val)
         rms_norms.update(norm)
         
@@ -212,16 +205,12 @@ def train_dqn_count(
                     ep_highlight_mask[to_remove[0], to_remove[1], to_remove[2]] = False
                     ep_colors[to_remove[0], to_remove[1], to_remove[2]] = None
                     
-            counter_moving.add(obj_moving_tuple, step)
-            counter_full.add(obj_tuple)
             agent.buffer.update_seen(obj_moving_tuple)
             last_ep.update(obs, action, obs_prime, next_action, int(done), obj_moving_tuple)
             items_added += 1
         else:
             q_next = state_to_q[State(state=obs_prime)] if not done else placeholder
             next_action = q_next.argmax()
-            last_expl_ep.update(obs, action, obs_prime, next_action, int(done), obj_moving_tuple)
-        
         
         if render and step >= num_timesteps - 1000:
             env.get_wrapper_attr('set_aux')(aux_pos) if aux_pos else None
@@ -234,31 +223,7 @@ def train_dqn_count(
         obs = obs_prime
         
         for _ in range(gradient_steps): 
-            batch_rewards, ind = counter_moving.sample(batch_size=batch_size)
-            batch_obs, batch_actions, _, batch_primes, batch_next_actions, batch_dones = agent.buffer.sample_index(ind)
-            last_obs, last_action, last_rewards, last_obs_primes, last_next_actions, last_dones = last_ep.get(counter_moving)            
-            (last_obs_expl, last_action_expl, last_rewards_expl, 
-             last_obs_primes_expl, last_next_actions_expl, last_dones_expl) = last_expl_ep.get(counter_moving) 
-            
-            batch_obs = torch.cat([batch_obs, last_obs, last_obs_expl], dim=0)
-            batch_actions = torch.cat([batch_actions, last_action, last_action_expl], dim=0)
-            batch_primes = torch.cat([batch_primes, last_obs_primes, last_obs_primes_expl], dim=0)
-            batch_next_actions = torch.cat([batch_next_actions, last_next_actions, last_next_actions_expl], dim=0)
-            batch_dones = torch.cat([batch_dones, last_dones, last_dones_expl], dim=0)
-            batch_rewards = torch.cat([batch_rewards, last_rewards, last_rewards_expl], dim=0)
-            
-            with torch.no_grad():
-                batch_rewards = batch_rewards.detach()
-                target_vals = agent.target_net(batch_primes).gather(dim=1, index=batch_next_actions)
-                targets = batch_rewards + gamma * target_vals * (1 - batch_dones)
-                
-            q_values = agent.net(batch_obs).gather(dim=1, index=batch_actions)
-            loss = mse_loss(q_values, targets.detach())
-            
-            agent.optimizer.zero_grad()
-            loss.backward()
-            grad_norm = torch.nn.utils.clip_grad_norm_(agent.net.parameters(), grad_norm)
-            agent.optimizer.step()
+            agent.update_step(batch_size, last_ep)
         
         if done:
             if render:
@@ -305,13 +270,12 @@ def train_dqn_count(
             scores.append(test_score)
             
             results = {
-                'lc_curves': learning_curves, 
+                'lc_curves': learning_curves,
+                'buffer': agent.buffer,  
                 'reg_test_scores' : scores,
                 'uniqueness': uniqueness, 
                 'images': imgs, 
                 'heatmap': heatmap_swap,
-                'counter_full': counter_full, 
-                'counter_moving': counter_moving, 
                 'aux_heatmap': aux_heatmap, 
                 'explore_heatmap': explore_heatmap,
                 'switch_states': switch_state_history,
@@ -328,11 +292,10 @@ def train_dqn_count(
     return {
         'lc_curves': learning_curves, 
         'reg_test_scores' : scores,
+        'buffer': agent.buffer,  
         'uniqueness': uniqueness, 
         'images': imgs, 
         'heatmap': heatmap_swap,
-        'counter_full': counter_full, 
-        'counter_moving': counter_moving, 
         'aux_heatmap': aux_heatmap, 
         'explore_heatmap': explore_heatmap,
         'switch_states': switch_state_history,
@@ -346,7 +309,7 @@ if __name__ == '__main__':
     
     
     parser = argparse.ArgumentParser()
-    parser.add_argument('-t', '--timesteps', type=int, default=int(5e5), help='timesteps')
+    parser.add_argument('-t', '--timesteps', type=int, default=int(3e5), help='timesteps')
     parser.add_argument('-f', '--dir', type=str, default='comb_test', help='save name')
     parser.add_argument('-a', '--alpha', type=float, default=1.5, help='alpha')
     parser.add_argument('-ag', '--lr_agent', type=float, default=1e-4, help='lr for dqn agent')
@@ -355,7 +318,7 @@ if __name__ == '__main__':
     parser.add_argument('-s', '--replaysize', type=int, default=int(1e5), help='size of replay buffer')
     parser.add_argument('-seed', '--seed', type=int, default=0, help='seed')
     parser.add_argument('-b', '--batch_size', type=int, default=64, help='batch size')
-    parser.add_argument('-fr', '--freq', type=int, default=int(1e5), help='freq of regression')
+    parser.add_argument('-fr', '--freq', type=int, default=int(1e6), help='freq of regression')
     parser.add_argument('--window', type=int, default=3500, help='window size of rms_dqn')
     parser.add_argument('-tau', '--tau', type=float, default=0.1, help='tau')
     parser.add_argument('--debug', action='store_true', help='debug mode')
@@ -414,7 +377,7 @@ if __name__ == '__main__':
     )
     
     
-    results, agent = train_dqn_count(
+    results, agent = train_uvu_count(
         args=aux_args,
         batch_size=args.batch_size,
         num_timesteps=args.timesteps,

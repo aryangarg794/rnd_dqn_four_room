@@ -15,7 +15,6 @@ from io import BytesIO
 import base64
 gym.register('MiniGrid-FourRooms-v1', FourRoomsEnv)
 
-# Your existing helper functions
 def find_states(history: list, timestep: int, capacity: int):
     """Find states within the buffer capacity window."""
     states = []
