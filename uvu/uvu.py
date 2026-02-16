@@ -5,18 +5,22 @@ import gymnasium as gym
 
 from copy import deepcopy
 
-from rnd_exploration.dataset import ReplayBuffer
+from rnd_exploration.dataset import ReplayBufferBoot
 from four_room.arch import CNN
 from utils.episode import LastEpisode
+from four_room.utils import obs_to_state
 
 class L2Norm(nn.Module):
     
-    def __call__(self, *args, **kwds):
-        return super().__call__(*args, **kwds)
+    def __init__(self, num_heads, num_actions, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.num_heads = num_heads
+        self.num_actions = num_actions
     
     def forward(self, x):
-        norm = torch.norm(x, dim=-1, keepdim=True) # (b, h) -> (b, 1)
-        return x / norm
+        x_headed = x.view(-1, self.num_heads, self.num_actions)
+        norm = torch.norm(x, dim=-1, keepdim=True) # (b, m, h) -> (b, m, 1)
+        return x_headed / norm
 
 class UVUModule(nn.Module):
     
@@ -24,11 +28,14 @@ class UVUModule(nn.Module):
         self,
         env: gym.Env,
         use_cnn: bool = True, 
+        num_heads: int = 10,
         cnn_features: int = 512, 
         hidden_layers: list = [512, 512, 512],
         residual: bool = True, 
         init: str = 'orthogonal',
         act: nn.Module = nn.ReLU,
+        use_state: bool = False, 
+        stack_linear: bool = True, 
         *args,
         **kwargs
     ) -> None:
@@ -38,19 +45,25 @@ class UVUModule(nn.Module):
 
         self.layers = nn.Sequential()
         
+        assert not (use_cnn and use_state), "Cant have both state and cnn"
         if use_cnn:
             self.layers.extend([
                 CNN(observation_space=env.observation_space, features_dim=cnn_features, residual=residual),
-                act(),
+                act()
+            ])
+        elif use_state:
+            self.layers.extend([
+                nn.Linear(9, cnn_features),
+                act()
             ])
         else:
             self.layers.extend([
-                nn.Linear(np.prod(env.observation_space.shape), cnn_features)
+                nn.Flatten(), nn.Linear(np.prod(env.observation_space.shape), cnn_features), act()
             ])
             
         self.layers.extend([
             nn.Linear(cnn_features, hidden_layers[0]),
-            L2Norm(),
+            # L2Norm()
         ])
         
         for layer1, layer2 in zip(hidden_layers[:-1], hidden_layers[1:]):
@@ -58,8 +71,16 @@ class UVUModule(nn.Module):
                 nn.Linear(layer1, layer2), 
                 act()
             ])
-            
-        self.layers.extend([nn.Linear(hidden_layers[-1], self.num_actions), L2Norm()])
+        
+        self.num_heads = num_heads        
+        self.stack_linear = stack_linear
+        
+        if stack_linear:
+            self.linears = nn.ModuleList([
+                nn.Linear(hidden_layers[-1], self.num_actions) for _ in range(num_heads)
+            ])
+        else:
+            self.layers.extend([nn.Linear(hidden_layers[-1], num_heads * self.num_actions)])
 
         self.apply(self.orthogonal_layer_init if init == 'orthogonal' else self._init)
 
@@ -70,12 +91,19 @@ class UVUModule(nn.Module):
           nn.init.zeros_(m.bias)
 
     def forward(self, x):
-        return self.layers(x)
+        if self.stack_linear:
+            rep = self.layers(x)
+            out = torch.stack([lin(rep) for lin in self.linears], dim=1)
+            out = out.view(-1, self.num_heads, self.num_actions)
+        else:
+            out = self.layers(x)
+            out = out.view(-1, self.num_heads, self.num_actions)
+        return out 
 
     def orthogonal_layer_init(layer, std=np.sqrt(2), bias_const=0.0):
         if hasattr(layer, 'weight'):
             nn.init.orthogonal_(layer.weight, std)
-            nn.init.constant_(layer.bias, bias_const)
+            nn.init.uniform_(layer.bias, -1, 1)
         
     
 class UVU:
@@ -87,18 +115,23 @@ class UVU:
         use_cnn: bool = True, 
         capacity: int = int(1e5),
         cnn_features: int = 512, 
-        gamma: float = 0.99, 
+        gamma: float = 0.9, 
         start_epsilon: float = 0.99,
         max_decay: float = 0.1,
         decay_steps: float = 10000,
         lr: float = 5e-4,
+        act: nn.Module = nn.LeakyReLU, 
         tau: float = 0.005,
         hidden_layers: list = [512, 512, 512],
         hidden_layers_g: list = [128],
+        num_heads: int = 10, 
         device: str = 'cuda', 
         residual: bool = True, 
         grad_norm: float = 10.0,
-        init: str = 'orthogonal', 
+        scale_params: bool = False, 
+        init: str = 'kaiming', 
+        use_state: bool = False, 
+        stack_linear: bool = False, 
         *args, 
         **kwargs
     ):
@@ -107,7 +140,12 @@ class UVU:
             use_cnn=use_cnn,
             hidden_layers=hidden_layers,
             cnn_features=cnn_features,
-            residual=residual
+            residual=residual,
+            init=init,
+            act=act, 
+            num_heads=num_heads,
+            use_state=use_state,
+            stack_linear=stack_linear
         ).to(device)
         
         self.target_net = deepcopy(self.net).to(device)
@@ -117,11 +155,23 @@ class UVU:
             use_cnn=use_cnn,
             hidden_layers=hidden_layers_g,
             cnn_features=cnn_features,
-            residual=residual
+            residual=residual,
+            init=init,
+            act=act,
+            num_heads=num_heads,
+            use_state=use_state,
+            stack_linear=stack_linear
         ).to(device)
         
-        for param in self.g.parameters():
-            param.requires_grad = False
+        self.num_heads = num_heads
+        
+        if scale_params:
+            for param in self.g.parameters():
+                param.requires_grad = False
+                param.data = param.data * 10
+        else: 
+            for param in self.g.parameters():
+                param.requires_grad = False
         
         self.env = env
         self.val_env = val_env
@@ -130,22 +180,36 @@ class UVU:
         self.decay_steps = decay_steps
         self.epsilon = start_epsilon
         
-        self.buffer = ReplayBuffer(state_dim=env.observation_space.shape, 
-                                   capacity=capacity, num_actions=env.action_space.n, device=device)
+        self.buffer = ReplayBufferBoot(state_dim=env.observation_space.shape, 
+                                   capacity=capacity, num_actions=env.action_space.n, 
+                                   device=device, num_heads=num_heads, use_state=use_state)
         
         self.optimizer = torch.optim.Adam(self.net.parameters(), lr=lr)
         
         self.tau = tau
         self.gamma = gamma
         self.grad_norm = grad_norm
-        self.loss = nn.HuberLoss()
+        self.loss = nn.MSELoss()
         self.device = device
+        self.use_state = use_state
         
+    def __call__(self, state: torch.Tensor):
+        return self.net(state)
+    
     def soft_update(self):
         with torch.no_grad():
             for param, target_param in zip(self.net.parameters(), self.target_net.parameters()):
                 target_param.data.copy_(self.tau * param.data + (1-self.tau) * target_param.data)
            
+           
+    def get_obs(self, obs: np.ndarray):
+        if self.use_state:
+            state = obs_to_state(obs)
+            np_state = np.array(list(state))
+            return torch.from_numpy(np_state).view(1, 9).to(self.device).float()
+        else:
+            return torch.from_numpy(obs).to(device=self.device).unsqueeze(dim=0).float()
+    
     def eval(self, num_runs: int = 10, seed: int = 0):
         self.net.eval()
         rewards = []
@@ -172,9 +236,10 @@ class UVU:
     
     @torch.no_grad()
     def epistemic(self, state: torch.Tensor, action: torch.Tensor):
-        u = self.net(state).gather(index=action, dim=-1) # (b, 1)
-        g = self.g(state).gather(index=action, dim=-1)
-        return (u - g).pow(2)
+        actions = action.unsqueeze(dim=1).repeat(1, self.num_heads, 1)
+        u = self.net(state).gather(index=actions, dim=-1) # (b, 1)
+        g = self.g(state).gather(index=actions, dim=-1)
+        return (u - g).pow(2).mean(dim=1)
     
     @torch.no_grad()
     def reward(
@@ -186,38 +251,51 @@ class UVU:
         dones: torch.Tensor
     ):
         # g - y * g'
-        g_cur = self.g(state).gather(index=action, dim=-1)
+        g_cur = self.g(state).gather(index=action, dim=-1) # (b, m, 1)
         g_next = self.g(next_state).gather(index=next_act, dim=-1)
         
-        return g_cur - self.gamma * g_next * (1 - dones)
+        return g_cur - self.gamma * g_next * (1 - dones) # (b, m, 1)
     
-    def update_step(self, batch_size: int, last_ep: LastEpisode):
-        batch_obs, batch_actions, _, batch_primes, batch_next_actions, batch_dones = self.buffer.sample(batch_size)
-        last_obs, last_action, _, last_obs_primes, last_next_actions, last_dones = last_ep.get()            
+    
+    def update_step(self, batch_size: int):
+        batch_obs, batch_actions, _, batch_primes, batch_next_actions, batch_dones, batch_masks = self.buffer.sample(batch_size)
         
-        batch_obs = torch.cat([batch_obs, last_obs], dim=0)
-        batch_actions = torch.cat([batch_actions, last_action], dim=0)
-        batch_primes = torch.cat([batch_primes, last_obs_primes], dim=0)
-        batch_next_actions = torch.cat([batch_next_actions, last_next_actions], dim=0)
-        batch_dones = torch.cat([batch_dones, last_dones], dim=0)
+        # batch_obs = torch.cat([batch_obs, last_obs], dim=0)
+        # batch_actions = torch.cat([batch_actions, last_action], dim=0)
+        # batch_primes = torch.cat([batch_primes, last_obs_primes], dim=0)
+        # batch_next_actions = torch.cat([batch_next_actions, last_next_actions], dim=0)
+        # batch_dones = torch.cat([batch_dones, last_dones], dim=0)
         batch_rewards = self.reward(batch_obs, batch_actions, batch_primes, batch_next_actions, batch_dones)
         
         with torch.no_grad():
-            batch_rewards = batch_rewards.detach()
-            target_vals = self.target_net(batch_primes).gather(dim=1, index=batch_next_actions)
+            batch_rewards = batch_rewards.detach() # (b, m, 1)
+            target_vals = self.target_net(batch_primes).gather(dim=-1, index=batch_next_actions)
             targets = batch_rewards + self.gamma * target_vals * (1 - batch_dones)
-            
-        q_values = self.net(batch_obs).gather(dim=1, index=batch_actions)
-        loss = self.loss(q_values, targets.detach())
+             
+        q_values = self.net(batch_obs).gather(dim=-1, index=batch_actions)
+        loss_heads = (targets - q_values)**2 * batch_masks.unsqueeze(dim=-1) # (b, m, 1)
+        loss_heads = loss_heads.squeeze(-1)
+        # sum the heads * mask and then mean over the batch
+        loss = (loss_heads.sum(dim=0) / batch_masks.sum(dim=0)).sum()
         
         self.optimizer.zero_grad()
         loss.backward()
         grad_norm = torch.nn.utils.clip_grad_norm_(self.net.parameters(), self.grad_norm)
         self.optimizer.step() 
-
-    def __call__(self, state: torch.Tensor):
-        return self.net(state)
+        
+        
+    def save(self, path):
+        torch.save({
+            'net' : self.net.state_dict(),
+            'g' : self.g.state_dict()
+        }, f'results/models/{path}.pt')
     
+    
+    def load(self, path):
+        saved_model = torch.load(f'results/models/{path}.pt', weights_only=True)
+        self.net.load_state_dict(saved_model['net'])
+        self.g.load_state_dict(saved_model['g'])
+        
     # only need this for testing
     def epsilon_greedy(self, state, dim=1):
         rng = np.random.random()
@@ -232,6 +310,7 @@ class UVU:
             action = torch.argmax(q_values, dim=dim)
 
         return action
+
 
     def epsilon_decay(self, step):
         self.epsilon = self.max_decay + (self.start_epsilon - self.max_decay) * max(0, (self.decay_steps - step) / self.decay_steps)

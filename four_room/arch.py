@@ -22,7 +22,7 @@ def kaiming_layer_init(layer, std=np.sqrt(2), bias_const=0.0):
     return layer
 
 class ResidualBlock(nn.Module):
-    def __init__(self, channels, init_function='orthogonal', residual=True):
+    def __init__(self, channels, act = nn.LeakyReLU, init_function='orthogonal', residual=True):
         super().__init__()
         if init_function == 'orthogonal':
             self.conv0 = orthogonal_layer_init(nn.Conv2d(in_channels=channels, out_channels=channels, kernel_size=3, padding=1))
@@ -32,18 +32,19 @@ class ResidualBlock(nn.Module):
             self.conv1 = kaiming_layer_init(nn.Conv2d(in_channels=channels, out_channels=channels, kernel_size=3, padding=1))
             
         self.residual = residual
+        self.act = act()
     
     def forward(self, x):
         inputs = x
-        x = nn.functional.relu(x)
+        x = self.act(x)
         x = self.conv0(x)
-        x = nn.functional.relu(x)
+        x = self.act(x)
         x = self.conv1(x)
         return x + inputs if self.residual else x
         
 
 class ConvSequence(nn.Module):
-    def __init__(self, input_shape, out_channels, max_pool=True, init_function='orthogonal', residual=True):
+    def __init__(self, input_shape, out_channels, act = nn.LeakyReLU, max_pool=True, init_function='orthogonal', residual=True):
         super().__init__()
         self.max_pool = max_pool
         self._input_shape = input_shape
@@ -53,8 +54,8 @@ class ConvSequence(nn.Module):
         elif init_function == 'kaiming':
             self.conv = kaiming_layer_init(nn.Conv2d(in_channels=self._input_shape[0], out_channels=self._out_channels, kernel_size=3, padding=1))
 
-        self.res_block0 = ResidualBlock(self._out_channels, init_function=init_function, residual=residual)
-        self.res_block1 = ResidualBlock(self._out_channels, init_function=init_function, residual=residual)
+        self.res_block0 = ResidualBlock(self._out_channels, init_function=init_function, residual=residual, act=act)
+        self.res_block1 = ResidualBlock(self._out_channels, init_function=init_function, residual=residual, act=act)
 
     def forward(self, x):
         x = self.conv(x)
@@ -85,19 +86,19 @@ class CNN(BaseFeaturesExtractor):
         This corresponds to the number of unit for the last layer.
     """
 
-    def __init__(self, observation_space: gym.spaces.Box, features_dim: int = 64, load_file = None, freeze_linear = False, 
+    def __init__(self, observation_space: gym.spaces.Box, act = nn.LeakyReLU, features_dim: int = 64, load_file = None, freeze_linear = False, 
                  init_function='orthogonal', residual=True):
         super().__init__(observation_space, features_dim)
         # We assume CxHxW images (channels first)
         # Re-ordering will be done by pre-preprocessing or wrapper
         n_input_channels = observation_space.shape[0]
-        # self.image_normaliser = 10
-        self.image_normaliser = 1.0
+        self.image_normaliser = 10
+        # self.image_normaliser = 1.0
         
-        conv_seq1 = ConvSequence(observation_space.shape, 64, max_pool=True, residual=residual, init_function=init_function)
-        conv_seq2 = ConvSequence(conv_seq1.get_output_shape(), 64, max_pool=True, residual=residual, init_function=init_function)
-        self.cnn = nn.Sequential(conv_seq1, conv_seq2)
-        # self.cnn = ConvSequence(observation_space.shape, 64, max_pool=True, init_function=init_function)
+        # conv_seq1 = ConvSequence(observation_space.shape, 64, max_pool=True, residual=residual, init_function=init_function)
+        # conv_seq2 = ConvSequence(conv_seq1.get_output_shape(), 64, max_pool=True, residual=residual, init_function=init_function)
+        # self.cnn = nn.Sequential(conv_seq1, conv_seq2)
+        self.cnn = ConvSequence(observation_space.shape, 64, act=act, max_pool=True, init_function=init_function, residual=residual)
 
 
         # Compute shape by doing one forward pass

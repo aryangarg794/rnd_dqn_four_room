@@ -15,15 +15,13 @@ from collections import deque
 
 from four_room.env import FourRoomsEnv
 from four_room.utils import obs_to_state
-from four_room.shortest_path import find_all_action_values, find_all_shortest_paths, compute_actions
 from four_room.wrappers import gym_wrapper
 from four_room.constants import state_to_q
 from rnd_exploration.utils import RunningAverage
 from four_room.constants import train_config, val_config, test_config, size
-from rnd_exploration.dataset import State, Transition
+from rnd_exploration.dataset import State
 from dqn_experiments.regression_exp_utils import run_experiment
 from uvu.uvu import UVU
-from utils.episode import LastEpisode
 from utils.exploration import aux_pos_multiple
 
 gym.register('MiniGrid-FourRooms-v1', FourRoomsEnv)
@@ -35,19 +33,21 @@ class Args:
     dir: str = 'test'
     seed: int = 0
     lr_agent: float = 5e-4
-    use_cnn: bool = True
+    use_cnn: bool = False
+    use_state: bool = True
     capacity: int = int(1e5)
     tau: float = 0.005
     use_actions: bool = False
     device: str = 'cuda'
+    gamma: float = 0.9
+    grad_norm: float = 10.0
+    num_heads: int = 512
     
 
 def train_uvu_count(
     args: Args, 
-    batch_size: int = 512, 
-    gamma: float = 0.99, 
+    batch_size: int = 512,
     num_timesteps: int = int(2e5), 
-    grad_norm: float = 10.0,
     regression_freq: int = 50000,
     seed: int = 0,
     alpha: float = 1.5, 
@@ -56,15 +56,12 @@ def train_uvu_count(
     gradient_steps: int = 5,
     render: bool = False,
     debug: bool = False,
-    return_ones: bool = True,
-    last_episode_len: int = 30,
     eps_mode: float = 0.05, 
     eps_dqn: float = 0.05,
 ): 
-    rms_dqn = RunningAverage(window_size=window)
-    rms_un = RunningAverage(window_size=window)
+    rms_uvu = RunningAverage(window_size=window)
     rms_norms = RunningAverage(window_size=window)
-    mse_loss = nn.HuberLoss()
+    
     os.makedirs('results/dqn_exps', exist_ok=True)
     os.makedirs('results/models', exist_ok=True)
     imgs = deque(maxlen=2500)
@@ -90,7 +87,10 @@ def train_uvu_count(
         use_cnn=args.use_cnn,
         cnn_features=512,
         hidden_layers=[512, 512, 512],
-        residual=True
+        hidden_layers_g=[512, 512, 512],
+        residual=True,
+        use_state=args.use_state,
+        num_heads=args.num_heads
     )
 
     env = deepcopy(args.env)
@@ -141,11 +141,10 @@ def train_uvu_count(
     switches = 0 
     trajs_added = 0
     contexts = []
-    last_ep = LastEpisode(args.env.observation_space.shape, capacity=last_episode_len, device=args.device)
     
     for step in (pbar := tqdm(range(1, num_timesteps+1), disable=debug)): 
         
-        obs_torch = torch.from_numpy(obs).to(device=args.device).unsqueeze(dim=0)
+        obs_torch = agent.get_obs(obs)
         state = obs_to_state(obs)
         contexts.append(current_context)
         agent_pos = env.get_wrapper_attr('agent_pos')
@@ -160,16 +159,17 @@ def train_uvu_count(
         
         with torch.no_grad():
             goal_action = state_to_q[State(obs)].argmax()
-            dqn_val = agent(obs_torch).squeeze()[goal_action].item()
+            goal_action = torch.tensor([goal_action], device=args.device).view(1, 1)
+            uvu_val = agent.epistemic(obs_torch, goal_action).item()
             obj_tuple = tuple([int(item) for item in state])
             obj_tuple = (*obj_tuple, current_context)
             obj_moving_tuple = (current_context, *agent_pos, state[2])
 
             q = state_to_q[State(state=obs)]
             
-        norm = (dqn_val - rms_dqn.avg)/rms_dqn.std
+        norm = (uvu_val - rms_uvu.avg)/rms_uvu.std
         
-        if dqn_val - rms_dqn.avg >= alpha * rms_dqn.std and not record and step >= warmupsteps: # swap to record mode 
+        if uvu_val - rms_uvu.avg >= alpha * rms_uvu.std and not record and step >= warmupsteps: # swap to record mode 
             switches += 1 
             heatmap_swap[current_context, agent_pos[0], agent_pos[1]] += 1
             record = True
@@ -185,7 +185,7 @@ def train_uvu_count(
             explore_heatmap[current_context, agent_pos[0], agent_pos[1]] += 1
         
         # if counter_moving.counts[*obj_moving_tuple] > 0:
-        rms_dqn.update(dqn_val)
+        rms_uvu.update(uvu_val)
         rms_norms.update(norm)
         
         if step < warmupsteps or record:
@@ -193,7 +193,12 @@ def train_uvu_count(
             # print(f'Timestep: {step} | Context: {current_context} | State: {agent_pos} | Dir: {state[2]} | Switch Count: {heatmap_swap[current_context, *agent_pos]} | Uncert: {uncertainty:.4f} | Count: {counter_moving.counts[*obj_moving_tuple]}')
             q_next = state_to_q[State(state=obs_prime)] if not done else placeholder
             next_action = q_next.argmax()
-            agent.buffer.update(obs, action, reward, obs_prime, next_action, int(done), q_value=q)
+            if done: 
+                prime_state = np.array((env.agent_pos[0], env.agent_pos[1], env.agent_dir, env.goal_pos[0], 
+                                env.goal_pos[0], *state[5:]))
+            else: 
+                prime_state = np.array(obs_to_state(obs_prime))
+            agent.buffer.update(np.array(obs_to_state(obs)), action, reward, prime_state, next_action, int(done), q_value=q)
             if render: 
                 ep_colors[current_context, agent_pos[0], agent_pos[1]] = (0, 0, 255)
                 ep_highlight_mask[current_context, agent_pos[0], agent_pos[1]] = True
@@ -206,7 +211,6 @@ def train_uvu_count(
                     ep_colors[to_remove[0], to_remove[1], to_remove[2]] = None
                     
             agent.buffer.update_seen(obj_moving_tuple)
-            last_ep.update(obs, action, obs_prime, next_action, int(done), obj_moving_tuple)
             items_added += 1
         else:
             q_next = state_to_q[State(state=obs_prime)] if not done else placeholder
@@ -222,8 +226,9 @@ def train_uvu_count(
             
         obs = obs_prime
         
-        for _ in range(gradient_steps): 
-            agent.update_step(batch_size, last_ep)
+        if agent.buffer.size >= batch_size:
+            for _ in range(gradient_steps): 
+                agent.update_step(batch_size)
         
         if done:
             if render:
@@ -285,9 +290,12 @@ def train_uvu_count(
                 dill.dump(results, file)
         
         uniqueness.append(agent.buffer.ratio_unique_trans)
-        value = (dqn_val - rms_dqn.avg)/rms_dqn.std  
+        value = (uvu_val - rms_uvu.avg)/rms_uvu.std  
         # pbar.set_description(f"Training RND DQN | Uniqueness: {agent.buffer.ratio_unique_trans:.4f} | Last Regression Exp: {(scores[-1] if len(scores) > 0 else 0):.4f} | Total Items added: {items_added} | Current Context: {current_context} | RND Val: {dqn_val:.4f} | Avg: {rms_dqn.avg:.4f} | STD: {rms_dqn.std:.4f} | Switches: {switches} | Value: {value:.4f}")
-        pbar.set_description(f"Training RND Count | Uniqueness: {agent.buffer.ratio_unique_trans:.4f} | Items added: {items_added} | Context: {current_context}")
+        reg_exp = (scores[-1] if len(scores) > 0 else 0)
+        pbar.set_description(f"Items added: {items_added} | Context: {current_context}")
+        pbar.set_postfix(unq=agent.buffer.ratio_unique_trans, norm_avg=rms_norms.avg, reg=reg_exp,
+                         switches=switches)
     
     return {
         'lc_curves': learning_curves, 
@@ -300,8 +308,7 @@ def train_uvu_count(
         'explore_heatmap': explore_heatmap,
         'switch_states': switch_state_history,
         'context_history': contexts,
-        'running_mean': rms_dqn,
-        'running_mean_un': rms_un,
+        'running_mean': rms_uvu,
         'running_mean_norms': rms_norms
     }, agent 
     
@@ -311,21 +318,21 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument('-t', '--timesteps', type=int, default=int(3e5), help='timesteps')
     parser.add_argument('-f', '--dir', type=str, default='comb_test', help='save name')
-    parser.add_argument('-a', '--alpha', type=float, default=1.5, help='alpha')
+    parser.add_argument('-a', '--alpha', type=float, default=1.0, help='alpha')
     parser.add_argument('-ag', '--lr_agent', type=float, default=1e-4, help='lr for dqn agent')
     parser.add_argument('-d', '--device', type=str, default='cuda', help='device')
     parser.add_argument('-r', '--render', action='store_true', help='render mode')
     parser.add_argument('-s', '--replaysize', type=int, default=int(1e5), help='size of replay buffer')
     parser.add_argument('-seed', '--seed', type=int, default=0, help='seed')
-    parser.add_argument('-b', '--batch_size', type=int, default=64, help='batch size')
+    parser.add_argument('-b', '--batch_size', type=int, default=128, help='batch size')
     parser.add_argument('-fr', '--freq', type=int, default=int(1e6), help='freq of regression')
     parser.add_argument('--window', type=int, default=3500, help='window size of rms_dqn')
     parser.add_argument('-tau', '--tau', type=float, default=0.1, help='tau')
     parser.add_argument('--debug', action='store_true', help='debug mode')
-    parser.add_argument('--return_ones', action='store_true', help='return ones')
+    parser.add_argument('--use_state', action='store_false', help='use state input')
+    parser.add_argument('--use_cnn', action='store_true', help='use cnn input')
     parser.add_argument('-ed', '--eps_dqn', type=float, default=0.05, help='eps dqn')
     parser.add_argument('-em', '--eps_mode', type=float, default=0.00, help='eps dqn')
-    parser.add_argument('--last_ep', type=int, default=10, help='window size of last_ep')
     parser.add_argument('--grad_steps', type=int, default=10, help='num of grad steps')
     
     args = parser.parse_args()
@@ -374,6 +381,8 @@ if __name__ == '__main__':
        device=args.device,
        capacity=args.replaysize, 
        tau=args.tau,
+       use_state=args.use_state,
+       use_cnn=args.use_cnn
     )
     
     
@@ -387,14 +396,12 @@ if __name__ == '__main__':
         render=args.render,
         debug=args.debug,
         window=args.window,
-        return_ones=args.return_ones,
         eps_dqn=args.eps_dqn,
         eps_mode=args.eps_mode,
-        last_episode_len=args.last_ep,
         gradient_steps=args.grad_steps
     )
     
-    torch.save(agent.net.state_dict(), f'results/models/{args.dir}_seed_{args.seed}_{args.timesteps}.pt')
+    agent.save(f'{args.dir}_seed_{args.seed}_{args.timesteps}')
     
     with open(f'results/dqn_exps/{args.dir}_seed_{args.seed}_{args.timesteps}.pl', 'wb') as file:
         dill.dump(results, file)

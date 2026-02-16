@@ -36,7 +36,8 @@ def plot_env_heatmap(
     ax=None, 
     agent_pos: tuple = None,  
     annot: bool = True, 
-    intize: bool = True
+    intize: bool = True,
+    cbar: bool = False
 ):
     """Plot environment heatmap with seaborn styling."""
     if ax is None:
@@ -88,7 +89,7 @@ def plot_env_heatmap(
     sns.heatmap(
         matrix,
         cmap='magma',
-        cbar=False,
+        cbar=cbar,
         annot=matrix_data if annot else False,
         cbar_kws={'label': label},
         ax=ax,

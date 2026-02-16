@@ -1,6 +1,8 @@
 import gymnasium as gym
 import numpy as np
 import torch 
+import imageio
+import cv2
 
 from dqn.model import DQN
 from uvu.uvu import UVU
@@ -10,6 +12,7 @@ from four_room.wrappers import gym_wrapper
 from four_room.utils import obs_to_state
 from four_room.constants import train_config, size, state_to_q
 from utils.q_values import compute_q_value
+
 
 @torch.no_grad()
 def get_rnd_scores(net: RNDNetwork, current_env: int, env_range: int = 5, device: str = 'cuda'):
@@ -162,7 +165,7 @@ def record_dqn_scores(agent: DQN, current_env: int, env_range: int = 5, device: 
 
     
 @torch.no_grad()
-def record_uvu_scores(agent: UVU, current_env: int, env_range: int = 5, device: str = 'cuda'):
+def record_uvu_scores(agent: UVU, current_env: int, env_range: int = 5, device: str = 'cuda', render: bool = False):
     env_ids = list(range(current_env-env_range, current_env+env_range+1))
     env = gym_wrapper(gym.make(
             'MiniGrid-FourRooms-v1', 
@@ -181,6 +184,7 @@ def record_uvu_scores(agent: UVU, current_env: int, env_range: int = 5, device: 
     results = np.zeros((4, len(env_ids), env.get_wrapper_attr('width'), env.get_wrapper_attr('height')),
                        dtype=np.float32)
     start_state, _, _ = env.get_wrapper_attr('context_info')(current_env)
+    imgs = []
     for idx, env_id in enumerate(env_ids):
         env.get_wrapper_attr('set_context')(env_id)
         obs, _ = env.reset()
@@ -194,11 +198,15 @@ def record_uvu_scores(agent: UVU, current_env: int, env_range: int = 5, device: 
                 state = obs_to_state(obs)
                 agent_dir = state[2]
                 
-                obs_torch = torch.from_numpy(obs).to(device=device).unsqueeze(dim=0)
+                obs_torch = agent.get_obs(obs)
                 goal_action = state_to_q[State(obs)].argmax()
                 goal_action = torch.from_numpy(np.array([goal_action])).to(device=device).unsqueeze(dim=0)
                 dqn_val = agent.epistemic(obs_torch, goal_action)
                 results[agent_dir, idx, *valid_state] = dqn_val
+                if render: 
+                    imgs.append(cv2.transpose(env.unwrapped.render()))
             
     agent.net.train()
+    if render:
+        imageio.mimsave(f'renders/rendered_uvu_test.gif', [np.array(img) for i, img in enumerate(imgs) if i%1 == 0], duration=150)
     return results.max(axis=0), env_ids, results

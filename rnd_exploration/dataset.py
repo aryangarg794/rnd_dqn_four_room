@@ -288,3 +288,45 @@ class ReplayBuffer:
     @property
     def ratio_unique_trans(self):
         return self.unique_trans.num_unique / len(self.trans) if len(self.trans) > 0 else 0.0
+    
+    
+class ReplayBufferBoot(ReplayBuffer):
+    
+    def __init__(self, state_dim, use_state, num_actions = 3, num_heads = 10, capacity = int(100000), device = 'cuda'):
+        super().__init__(state_dim, num_actions, capacity, device)
+        
+        self.num_heads = num_heads
+        state_space = (self.capacity, *state_dim) if not use_state else (self.capacity, 9)
+        self.states = torch.zeros(state_space, dtype=torch.float, device=self.device)
+        self.next_states = torch.zeros(state_space, dtype=torch.float, device=self.device)
+        self.masks = torch.zeros((capacity, num_heads), device=self.device)
+        
+        
+    def sample(self, batch_size: int = 256):
+        ind = torch.randint(0, self.size, device=self.device, size=(batch_size,))
+        batch_torch = (
+            self.states[ind], 
+            self.actions[ind].unsqueeze(dim=1).repeat(1, self.num_heads, 1), 
+            self.rewards[ind],
+            self.next_states[ind], 
+            self.next_actions[ind].unsqueeze(dim=1).repeat(1, self.num_heads, 1),
+            self.dones[ind].unsqueeze(dim=1).repeat(1, self.num_heads, 1),
+            self.masks[ind]
+        )
+        return batch_torch 
+    
+    def update(
+        self, 
+        state: np.ndarray, 
+        action: np.ndarray,
+        reward: float,  
+        next_state: np.ndarray,
+        next_action: np.ndarray,  
+        done: float | bool,
+        *,
+        q_value: np.ndarray | None = None
+    ) -> None:
+        
+        self.masks[self.pointer] = torch.bernoulli(torch.full((self.num_heads,), 0.5))
+        
+        super().update(state, action, reward, next_state, next_action, done, q_value=q_value)
