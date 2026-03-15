@@ -438,6 +438,7 @@ class DQNBasePolicy(DQNPolicy):
         use_dual = False,
         use_action = False,  
         use_norm = True, 
+        init_func = 'kaiming', 
         activation_fn = nn.ReLU, 
         features_extractor_class = ..., 
         features_extractor_kwargs = None, 
@@ -449,6 +450,7 @@ class DQNBasePolicy(DQNPolicy):
         self.use_cnn = use_cnn
         self.use_action = use_action
         self.use_norm = use_norm
+        self.init_func = init_func
         super().__init__(
             observation_space, 
             action_space, 
@@ -466,14 +468,22 @@ class DQNBasePolicy(DQNPolicy):
     def make_q_net(self):
         if self.use_dual:
             if self.use_action:
-                model = DQNBaseDualAction(observation_space=self.observation_space, action_space=self.action_space, norm=self.use_norm)
+                model = DQNBaseDualAction(observation_space=self.observation_space, 
+                                          action_space=self.action_space, norm=self.use_norm,
+                                          init=self.init_func)
             else: 
-                model = DQNBaseDual(observation_space=self.observation_space, action_space=self.action_space, norm=self.use_norm)
+                model = DQNBaseDual(observation_space=self.observation_space, action_space=self.action_space, 
+                                    norm=self.use_norm, 
+                                    init=self.init_func)
         else:
             if self.use_action:
-                model = DQNBaseAction(observation_space=self.observation_space, action_space=self.action_space, use_cnn=self.use_cnn, norm=self.use_norm)
+                model = DQNBaseAction(observation_space=self.observation_space, action_space=self.action_space, 
+                                      use_cnn=self.use_cnn, norm=self.use_norm, 
+                                      init=self.init_func)
             else:
-                model = DQNBase(observation_space=self.observation_space, action_space=self.action_space, use_cnn=self.use_cnn, norm=self.use_norm)
+                model = DQNBase(observation_space=self.observation_space, action_space=self.action_space,
+                                use_cnn=self.use_cnn, norm=self.use_norm, 
+                                init=self.init_func)
         
         return  model
     

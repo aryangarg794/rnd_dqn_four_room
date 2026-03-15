@@ -2,13 +2,14 @@ from stable_baselines3.dqn.dqn import DQN
 from stable_baselines3.common.buffers import ReplayBuffer
 from stable_baselines3.common.vec_env import DummyVecEnv
 from stable_baselines3.common.env_util import make_vec_env
-from stable_baselines3.common.callbacks import EvalCallback, BaseCallback, CallbackList
+from stable_baselines3.common.callbacks import BaseCallback, CallbackList
 from stable_baselines3.common.logger import configure
 
 import torch
 import wandb
 from wandb.integration.sb3 import WandbCallback
 from dqn.archs import DQNBasePolicy
+from dqn.callbacks import EvalCallbackCustom
 
 import gymnasium as gym
 from four_room.env import FourRoomsEnv
@@ -18,25 +19,41 @@ from four_room.wrappers import gym_wrapper_state
 import argparse
 import os
 import csv
+import dill
 import matplotlib.pyplot as plt
 from copy import deepcopy
 
 gym.register('MiniGrid-FourRooms-v1', FourRoomsEnv)
+
+from stable_baselines3.common.callbacks import BaseCallback, CallbackList
+from wandb.integration.sb3 import WandbCallback
+
+def human_format(num):
+    num = float('{:.3g}'.format(num))
+    magnitude = 0
+    while abs(num) >= 1000:
+        magnitude += 1
+        num /= 1000.0
+    
+    suffixes = ['', 'k', 'M', 'B', 'T']
+    return '{}{}'.format('{:f}'.format(num).rstrip('0').rstrip('.'), suffixes[magnitude])
 
 num_train_configs = len(train_config['topologies'])
 device = "cuda" if torch.cuda.is_available() else "cpu"
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument('-f', '--dir', type=str, default='dqn_solve_test', help='save name')
+    parser.add_argument('-f', '--dir', type=str, default='dqn', help='save name')
     parser.add_argument('-ag', '--lr', type=float, default=5e-4, help='lr for dqn agent')
     parser.add_argument('-s', '--seed', type=int, default=0, help='seed')
     parser.add_argument('-b', '--batch', type=int, default=256, help='batch_size')
+    parser.add_argument('-t', '--timesteps', type=int, default=4_000_000, help='batch_size')
     parser.add_argument('-g', '--gamma', type=float, default=0.99, help='discount for the agent')
     parser.add_argument('--use_cnn', action='store_true', help='use cnn input')
     parser.add_argument('--use_action', action='store_true', help='use cnn input')
     parser.add_argument('--use_dual', action='store_true', help='use cnn input')
     parser.add_argument('--use_norm', action='store_true', help='use norm input')
+    parser.add_argument('-i', '--init', type=str, default='kaiming', help='init func')
     
     args = parser.parse_args()
     
@@ -72,25 +89,37 @@ if __name__ == "__main__":
     policy_kwargs['use_action'] = args.use_action
     policy_kwargs['use_dual'] = args.use_dual
     policy_kwargs['use_norm'] = args.use_norm
+    policy_kwargs['init_func'] = args.init
     
-    save_file_name = f'{args.dir}_seed_{args.seed}'
-    eval_callback = EvalCallback(
+    name_cnn = '_cnn' if args.use_cnn else '_mlp'
+    name_norm = '_norm' if args.use_norm else ''
+    name_act = '_act' if args.use_action else ''
+    name_dual = '_dual' if args.use_dual else ''
+    name_init = '_' + args.init
+    time_name = human_format(args.timesteps)
+    
+    
+    group_name = f'{args.dir}{name_cnn}{name_act}{name_dual}{name_norm}{name_init}_{time_name}'
+    save_file_name = f'{group_name}_seed_{args.seed}'
+    
+    eval_callback = EvalCallbackCustom(
         eval_env, 
+        save_file_name=save_file_name,
         n_eval_episodes=num_train_configs, 
-        eval_freq=max(100_000 // n_envs, 1), 
+        eval_freq=max(1000 // n_envs, 1), 
         verbose=0,
-        log_path="logging/"
+        log_path=f"logging/"
     )
-    wandb.init(
-        project="four-room-project",
-        sync_tensorboard=True,  
-        name=save_file_name,
-        group=args.dir,
-        config=policy_kwargs
-    )
+    # wandb.init(
+    #     project="four-room-project",
+    #     sync_tensorboard=True,  
+    #     name=save_file_name,
+    #     group=group_name,
+    #     config=policy_kwargs,
+    # )
     
-    wandb_callback = WandbCallback()
-    callback = CallbackList([eval_callback, wandb_callback])
+    # wandb_callback = WandbCallback()
+    callback = CallbackList([eval_callback])
 
     model = DQN(
         DQNBasePolicy,
@@ -116,7 +145,7 @@ if __name__ == "__main__":
     )
 
     
-    model.learn(total_timesteps=4_000_000, callback=callback, progress_bar=True, tb_log_name=save_file_name)
+    model.learn(total_timesteps=args.timesteps, callback=callback, progress_bar=True)
     train_env.close()
     eval_env.close()
     wandb.finish()
