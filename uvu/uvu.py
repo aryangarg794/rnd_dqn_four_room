@@ -12,15 +12,12 @@ from four_room.utils import obs_to_state
 
 class L2Norm(nn.Module):
     
-    def __init__(self, num_heads, num_actions, *args, **kwargs):
+    def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
-        self.num_heads = num_heads
-        self.num_actions = num_actions
     
     def forward(self, x):
-        x_headed = x.view(-1, self.num_heads, self.num_actions)
-        norm = torch.norm(x, dim=-1, keepdim=True) # (b, m, h) -> (b, m, 1)
-        return x_headed / norm
+        norm = torch.norm(x, dim=-1, keepdim=True) # (b, h) -> (b, h)
+        return x / norm
 
 class UVUModule(nn.Module):
     
@@ -36,6 +33,7 @@ class UVUModule(nn.Module):
         act: nn.Module = nn.ReLU,
         use_state: bool = False, 
         stack_linear: bool = True, 
+        scale: float = 1.0, 
         *args,
         **kwargs
     ) -> None:
@@ -63,7 +61,7 @@ class UVUModule(nn.Module):
             
         self.layers.extend([
             nn.Linear(cnn_features, hidden_layers[0]),
-            # L2Norm()
+            L2Norm()
         ])
         
         for layer1, layer2 in zip(hidden_layers[:-1], hidden_layers[1:]):
@@ -80,7 +78,9 @@ class UVUModule(nn.Module):
                 nn.Linear(hidden_layers[-1], self.num_actions) for _ in range(num_heads)
             ])
         else:
-            self.layers.extend([nn.Linear(hidden_layers[-1], num_heads * self.num_actions)])
+            self.layers.extend([L2Norm(), nn.Linear(hidden_layers[-1], num_heads * self.num_actions)])
+            
+        self.scale = scale 
 
         self.apply(self.orthogonal_layer_init if init == 'orthogonal' else self._init)
 
@@ -98,7 +98,7 @@ class UVUModule(nn.Module):
         else:
             out = self.layers(x)
             out = out.view(-1, self.num_heads, self.num_actions)
-        return out 
+        return out * self.scale
 
     def orthogonal_layer_init(layer, std=np.sqrt(2), bias_const=0.0):
         if hasattr(layer, 'weight'):
@@ -129,6 +129,7 @@ class UVU:
         residual: bool = True, 
         grad_norm: float = 10.0,
         scale_params: bool = False, 
+        scale: float = 1.0, 
         init: str = 'kaiming', 
         use_state: bool = False, 
         stack_linear: bool = False, 
@@ -143,6 +144,7 @@ class UVU:
             residual=residual,
             init=init,
             act=act, 
+            scale=scale, 
             num_heads=num_heads,
             use_state=use_state,
             stack_linear=stack_linear
@@ -158,6 +160,7 @@ class UVU:
             residual=residual,
             init=init,
             act=act,
+            scale=scale, 
             num_heads=num_heads,
             use_state=use_state,
             stack_linear=stack_linear
@@ -192,9 +195,10 @@ class UVU:
         self.loss = nn.MSELoss()
         self.device = device
         self.use_state = use_state
+        self.scale = scale
         
     def __call__(self, state: torch.Tensor):
-        return self.net(state)
+        return self.net(state) * self.scale 
     
     def soft_update(self):
         with torch.no_grad():
@@ -206,7 +210,7 @@ class UVU:
         if self.use_state:
             state = obs_to_state(obs)
             np_state = np.array(list(state))
-            return torch.from_numpy(np_state).view(1, 9).to(self.device).float()
+            return torch.from_numpy(np_state).view(1, len(np_state)).to(self.device).float()
         else:
             return torch.from_numpy(obs).to(device=self.device).unsqueeze(dim=0).float()
     
@@ -239,7 +243,13 @@ class UVU:
         actions = action.unsqueeze(dim=1).repeat(1, self.num_heads, 1)
         u = self.net(state).gather(index=actions, dim=-1) # (b, 1)
         g = self.g(state).gather(index=actions, dim=-1)
-        return (u - g).pow(2).mean(dim=1)
+        return (u - g).pow(2).mean(dim=1) 
+    
+    @torch.no_grad()
+    def epistemic_no_act(self, state: torch.Tensor):
+        u = self.net(state)
+        g = self.g(state)
+        return (u - g).pow(2).mean(dim=1) 
     
     @torch.no_grad()
     def reward(
@@ -265,9 +275,9 @@ class UVU:
         # batch_primes = torch.cat([batch_primes, last_obs_primes], dim=0)
         # batch_next_actions = torch.cat([batch_next_actions, last_next_actions], dim=0)
         # batch_dones = torch.cat([batch_dones, last_dones], dim=0)
-        batch_rewards = self.reward(batch_obs, batch_actions, batch_primes, batch_next_actions, batch_dones)
         
         with torch.no_grad():
+            batch_rewards = self.reward(batch_obs, batch_actions, batch_primes, batch_next_actions, batch_dones)
             batch_rewards = batch_rewards.detach() # (b, m, 1)
             target_vals = self.target_net(batch_primes).gather(dim=-1, index=batch_next_actions)
             targets = batch_rewards + self.gamma * target_vals * (1 - batch_dones)

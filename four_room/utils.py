@@ -41,7 +41,11 @@ def obs_to_state(obs):
     if obs.shape[0] == 3:
         player_loc = (np.where(obs[0] == OBJECT_TO_IDX["agent"])[1][0], np.where(obs[0] == OBJECT_TO_IDX["agent"])[0][0])
         player_dir = obs[2][player_loc[1], player_loc[0]]
-        goal_loc = (np.where(obs[0] == OBJECT_TO_IDX["goal"])[1][0], np.where(obs[0] == OBJECT_TO_IDX["goal"])[0][0])
+        goal_coords = np.where(obs[0] == OBJECT_TO_IDX["goal"])
+        if len(goal_coords[0]) > 0:
+            goal_loc = (goal_coords[1][0], goal_coords[0][0])
+        else:
+            goal_loc = player_loc
         doors_pos = (*(np.where(~(obs[0][:, room_size+1] == 2))[0] - np.array([1, room_size+2])), *(np.where(~(obs[0][room_size+1, :] == 2))[0] - np.array([1, room_size+2])))
 
         return (*player_loc, player_dir, *goal_loc, *doors_pos)
@@ -71,7 +75,11 @@ def obs_to_state(obs):
             # up
             player_dir = 3
         
-        goal_loc = (np.where(uncentered_obs[3] == 1)[1][0], np.where(uncentered_obs[3] == 1)[0][0])
+        goal_search = np.where(uncentered_obs[3] == 1)
+        if len(goal_search[0]) > 0:
+            goal_loc = (goal_search[1][0], goal_search[0][0])
+        else:
+            goal_loc = player_loc
 
         walls = uncentered_obs[2]
         doors_pos = (*(np.where(walls[:, room_size+1] == 0)[0] - np.array([1, room_size+2])), *(np.where(walls[room_size+1, :] == 0)[0] - np.array([1, room_size+2])))

@@ -17,13 +17,15 @@ from rnd_exploration.dataset import State
 from plot_interactive import plot_env_heatmap, find_states
 from dqn.model import DQN
 from rnd_exploration.rnd import RNDNetwork
+from uvu.uvu import UVU
 from utils.q_values import compute_q_value
-from utils.record_scores import record_dqn_scores, get_rnd_scores, get_q_optimal, record_uncertainty_scores
+from utils.record_scores import record_dqn_scores, get_rnd_scores, get_q_optimal, record_uncertainty_scores, record_uvu_scores
 gym.register('MiniGrid-FourRooms-v1', FourRoomsEnv)
 
 
 @torch.no_grad()
-def simulate_trajectory(file_name: str, alpha: float = 1.0, device: str = 'cuda', rnd: bool = False, optimal: bool = False):
+def simulate_trajectory(file_name: str, alpha: float = 1.0, device: str = 'cuda', rnd: bool = False, optimal: bool = False,
+                        scale: int = 1, normalized: bool = True):
     
     env = gym_wrapper(gym.make(
                 'MiniGrid-FourRooms-v1', 
@@ -53,12 +55,27 @@ def simulate_trajectory(file_name: str, alpha: float = 1.0, device: str = 'cuda'
     random_context = np.random.randint(0, 199)
     env.get_wrapper_attr('set_context')(random_context)
     obs, _ = env.reset()
+    
+    uvu = False
+    
     if optimal:
         dqn_scores, _, dqn_scores_dirs = get_q_optimal(counter, random_context, 0, 0.99)
+    elif file_name[0:3] == "uvu":
+        agent = UVU(env, deepcopy(env), hidden_layers=[512, 512, 512], hidden_layers_g=[512, 512, 512], 
+                    num_heads=512, use_state=True, use_cnn=False, device=device)
+        agent.load(file_name)
+        agent.net.eval()
+        dqn_scores, _, dqn_scores_dirs = record_uvu_scores(agent, random_context, 0)
+        dqn_scores = dqn_scores / scale
+        dqn_scores_dirs = dqn_scores_dirs / scale
+        uvu = True
     else:
         agent.net.load_state_dict(torch.load(f'results/models/{file_name}.pt', weights_only=True))
         agent.net.eval()
         dqn_scores, _, dqn_scores_dirs = record_dqn_scores(agent, random_context, 0)
+        
+        
+        
     context_info = env.get_wrapper_attr('context_info')(random_context)
     context_info = (*context_info, env.get_wrapper_attr('valid_pos'))
     normalized_scores = (dqn_scores - rms_dqn.avg)/rms_dqn.std
@@ -104,7 +121,7 @@ def simulate_trajectory(file_name: str, alpha: float = 1.0, device: str = 'cuda'
         
         step += 1
         agent_pos = env.get_wrapper_attr('agent_pos')
-        obs_torch = torch.from_numpy(obs).to(device=device).unsqueeze(dim=0)
+        
         if np.array_equal(target_pos, aux_pos) and not np.array_equal(agent_pos, aux_pos):
             action = actions.pop(0)
         else:
@@ -116,7 +133,12 @@ def simulate_trajectory(file_name: str, alpha: float = 1.0, device: str = 'cuda'
         if optimal:
             dqn_val = compute_q_value(obs, random_context, counter, 0.99, goal_action)
             norm = (dqn_val - rms_dqn.avg)/rms_dqn.std 
+        elif uvu:
+            obs_torch = agent.get_obs(obs)
+            goal_action = torch.tensor([goal_action], device=device).view(1, 1)
+            dqn_val = agent.epistemic(obs_torch, goal_action).item()
         else:
+            obs_torch = torch.from_numpy(obs).to(device=device).unsqueeze(dim=0)
             dqn_val = agent(obs_torch).squeeze()[goal_action].item()
         obj_tuple = tuple([int(item) for item in state])
             
@@ -179,7 +201,7 @@ def simulate_trajectory(file_name: str, alpha: float = 1.0, device: str = 'cuda'
         
         # conversion due to transpose 0 -> 1, 1 -> 0, 2 -> 3, 3 -> 2
         plot_env_heatmap(
-            normalized_scores_dirs[0].squeeze(),
+            normalized_scores_dirs[0].squeeze() if normalized else dqn_scores_dirs[0].squeeze(),
             context_info,
             'DQN Scores',
             f'DQN Scores for context {random_context} for Down',
@@ -189,7 +211,7 @@ def simulate_trajectory(file_name: str, alpha: float = 1.0, device: str = 'cuda'
         )
 
         plot_env_heatmap(
-            normalized_scores_dirs[1].squeeze(),
+            normalized_scores_dirs[1].squeeze() if normalized else dqn_scores_dirs[1].squeeze(),
             context_info,
             'DQN Scores',
             f'DQN Scores for context {random_context} for Right',
@@ -199,7 +221,7 @@ def simulate_trajectory(file_name: str, alpha: float = 1.0, device: str = 'cuda'
         )
 
         plot_env_heatmap(
-            normalized_scores_dirs[2].squeeze(),
+            normalized_scores_dirs[2].squeeze() if normalized else dqn_scores_dirs[2].squeeze(),
             context_info,
             'DQN Scores',
             f'DQN Scores for context {random_context} for Up',
@@ -209,7 +231,7 @@ def simulate_trajectory(file_name: str, alpha: float = 1.0, device: str = 'cuda'
         )
 
         plot_env_heatmap(
-            normalized_scores_dirs[3].squeeze(),
+            normalized_scores_dirs[3].squeeze() if normalized else dqn_scores_dirs[3].squeeze(),
             context_info,
             'DQN Scores',
             f'DQN Scores for context {random_context} for Left',
@@ -258,7 +280,9 @@ if __name__ == '__main__':
     parser.add_argument('-r', '--rnd', action='store_true', help='rnd mode')
     parser.add_argument('-o', '--opt', action='store_true', help='optimal mode')
     parser.add_argument('-f', '--dir', type=str, default='dqn_count_test', help='save name')
+    parser.add_argument('-un', '--unnorm', action='store_false', help='optimal mode')
+    parser.add_argument('-s', '--scale', type=int, default=1, help='scale')
     
     args = parser.parse_args()
     
-    simulate_trajectory(args.dir, rnd=args.rnd, optimal=args.opt)
+    simulate_trajectory(args.dir, rnd=args.rnd, optimal=args.opt, normalized=args.unnorm, scale=args.scale)

@@ -47,10 +47,10 @@ eval_env = make_vec_env('MiniGrid-FourRooms-v1',
                         seed=0, 
                         vec_env_cls=DummyVecEnv, 
                         wrapper_class=gym_wrapper, 
-                        env_kwargs={'agent_pos': val_config['agent positions'],
-                                    'goal_pos': val_config['goal positions'],
-                                    'doors_pos': val_config['topologies'],
-                                    'agent_dir': val_config['agent directions']})
+                        env_kwargs={'agent_pos': train_config['agent positions'],
+                                    'goal_pos': train_config['goal positions'],
+                                    'doors_pos': train_config['topologies'],
+                                    'agent_dir': train_config['agent directions']})
 
 train_env = make_vec_env('MiniGrid-FourRooms-v1', 
                         n_envs=n_envs, 
@@ -79,7 +79,8 @@ from wandb.integration.sb3 import WandbCallback
 with wandb.init(
         project="four-room-project",
         sync_tensorboard=True,  # auto-upload sb3's tensorboard metrics
-        name="DQN",
+        name="DQN_seed_0",
+        group="DQN"
         ):
     wandb_callback = WandbCallback()
 
@@ -104,6 +105,6 @@ with wandb.init(
         device=device,
         )
 
-    model.learn(total_timesteps=8_000_000, callback=callback)
+    model.learn(total_timesteps=8_000_000, callback=callback, progress_bar=True)
     train_env.close()
     eval_env.close()

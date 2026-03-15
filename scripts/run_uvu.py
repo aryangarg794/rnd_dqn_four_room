@@ -13,6 +13,7 @@ from dataclasses import dataclass
 from tqdm import tqdm
 from collections import deque
 
+from dqn.counter import MovingCountBasedUncertainty, CountBasedUncertainty
 from four_room.env import FourRoomsEnv
 from four_room.utils import obs_to_state
 from four_room.wrappers import gym_wrapper
@@ -58,6 +59,7 @@ def train_uvu_count(
     debug: bool = False,
     eps_mode: float = 0.05, 
     eps_dqn: float = 0.05,
+    gamma: float = 0.95, 
 ): 
     rms_uvu = RunningAverage(window_size=window)
     rms_norms = RunningAverage(window_size=window)
@@ -90,7 +92,8 @@ def train_uvu_count(
         hidden_layers_g=[512, 512, 512],
         residual=True,
         use_state=args.use_state,
-        num_heads=args.num_heads
+        num_heads=args.num_heads,
+        gamma=gamma
     )
 
     env = deepcopy(args.env)
@@ -141,6 +144,9 @@ def train_uvu_count(
     switches = 0 
     trajs_added = 0
     contexts = []
+    
+    counter_moving = MovingCountBasedUncertainty(capacity=args.capacity, device=args.device)
+    counter_full = CountBasedUncertainty(capacity=args.capacity)
     
     for step in (pbar := tqdm(range(1, num_timesteps+1), disable=debug)): 
         
@@ -209,7 +215,9 @@ def train_uvu_count(
                     to_remove = visit_history[0]
                     ep_highlight_mask[to_remove[0], to_remove[1], to_remove[2]] = False
                     ep_colors[to_remove[0], to_remove[1], to_remove[2]] = None
-                    
+            
+            counter_moving.add(obj_moving_tuple, step)
+            counter_full.add(obj_tuple)        
             agent.buffer.update_seen(obj_moving_tuple)
             items_added += 1
         else:
@@ -281,6 +289,8 @@ def train_uvu_count(
                 'uniqueness': uniqueness, 
                 'images': imgs, 
                 'heatmap': heatmap_swap,
+                'counter_full': counter_full, 
+                'counter_moving': counter_moving, 
                 'aux_heatmap': aux_heatmap, 
                 'explore_heatmap': explore_heatmap,
                 'switch_states': switch_state_history,
@@ -295,7 +305,7 @@ def train_uvu_count(
         reg_exp = (scores[-1] if len(scores) > 0 else 0)
         pbar.set_description(f"Items added: {items_added} | Context: {current_context}")
         pbar.set_postfix(unq=agent.buffer.ratio_unique_trans, norm_avg=rms_norms.avg, reg=reg_exp,
-                         switches=switches)
+                         switches=switches, uvu_avg=rms_uvu.avg)
     
     return {
         'lc_curves': learning_curves, 
@@ -305,6 +315,8 @@ def train_uvu_count(
         'images': imgs, 
         'heatmap': heatmap_swap,
         'aux_heatmap': aux_heatmap, 
+        'counter_full': counter_full, 
+        'counter_moving': counter_moving, 
         'explore_heatmap': explore_heatmap,
         'switch_states': switch_state_history,
         'context_history': contexts,
@@ -317,7 +329,7 @@ if __name__ == '__main__':
     
     parser = argparse.ArgumentParser()
     parser.add_argument('-t', '--timesteps', type=int, default=int(3e5), help='timesteps')
-    parser.add_argument('-f', '--dir', type=str, default='comb_test', help='save name')
+    parser.add_argument('-f', '--dir', type=str, default='uvu_test', help='save name')
     parser.add_argument('-a', '--alpha', type=float, default=1.0, help='alpha')
     parser.add_argument('-ag', '--lr_agent', type=float, default=1e-4, help='lr for dqn agent')
     parser.add_argument('-d', '--device', type=str, default='cuda', help='device')
@@ -328,6 +340,7 @@ if __name__ == '__main__':
     parser.add_argument('-fr', '--freq', type=int, default=int(1e6), help='freq of regression')
     parser.add_argument('--window', type=int, default=3500, help='window size of rms_dqn')
     parser.add_argument('-tau', '--tau', type=float, default=0.1, help='tau')
+    parser.add_argument('-g', '--gamma', type=float, default=0.95, help='discount')
     parser.add_argument('--debug', action='store_true', help='debug mode')
     parser.add_argument('--use_state', action='store_false', help='use state input')
     parser.add_argument('--use_cnn', action='store_true', help='use cnn input')
@@ -398,7 +411,8 @@ if __name__ == '__main__':
         window=args.window,
         eps_dqn=args.eps_dqn,
         eps_mode=args.eps_mode,
-        gradient_steps=args.grad_steps
+        gradient_steps=args.grad_steps,
+        gamma=args.gamma
     )
     
     agent.save(f'{args.dir}_seed_{args.seed}_{args.timesteps}')

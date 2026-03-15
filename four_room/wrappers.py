@@ -1,9 +1,13 @@
+import gymnasium as gym
+import matplotlib.pyplot as plt
 from minigrid.wrappers import ImgObsWrapper, FullyObsWrapper
 
 from gymnasium import spaces
 from gymnasium.core import Wrapper
 import numpy as np
 from minigrid.core.constants import DIR_TO_VEC
+
+from four_room.utils import obs_to_state
 
 class UndiscountedRewardWrapper(Wrapper):
     """
@@ -125,6 +129,45 @@ class TransposeFullyObsWrapper(FullyObsWrapper):
         full_grid = np.transpose(full_grid, axes=(2,1,0))
         obs_dict['image'] = full_grid
         return obs_dict
+    
+
+class FullStateWrapper(gym.ObservationWrapper):
+    def __init__(self, env, vector_dim=13, size=19):
+        self.size = size
+        super().__init__(env)
+        self.observation_space = gym.spaces.Box(
+            low=0, high=np.inf, shape=(vector_dim,), dtype=np.float32
+        )
+
+    def observation(self, obs):
+        state = obs_to_state(obs)
+        doors = state[5:]
+        
+        room_w = self.size // 2
+        room_h = self.size // 2
+        
+        final_state = [item for item in state[:5]]
+        
+        for j in range(0, 2):
+            for i in range(0, 2):
+                xL = i * room_w
+                yT = j * room_h
+                xR = xL + room_w
+                yB = yT + room_h
+
+                if i + 1 < 2:
+                    pos = (xR, int(yT + 1 + doors[j]))
+                    final_state.append(pos[0])
+                    final_state.append(pos[1])
+
+                if j + 1 < 2:
+                    pos = (int(xL + 1 + doors[2 + i]), yB)
+                    final_state.append(pos[0])
+                    final_state.append(pos[1])
+
+        final_state = np.array(final_state)
+        
+        return final_state.astype(np.float32)
 
 def gym_wrapper(env, original_obs=True): 
     if original_obs:
@@ -137,3 +180,20 @@ def gym_wrapper(env, original_obs=True):
                 UndiscountedRewardWrapper(
                     SparseActionsWrapper(
                             SparseFullyObsWrapper(env))))
+        
+        
+def gym_wrapper_state(env, use_cnn=False): 
+    if use_cnn:
+        return ImgObsWrapper(
+                UndiscountedRewardWrapper(
+                    SparseActionsWrapper(
+                            TransposeFullyObsWrapper(env))))
+    else:
+        return FullStateWrapper(ImgObsWrapper(
+                UndiscountedRewardWrapper(
+                    SparseActionsWrapper(
+                            TransposeFullyObsWrapper(env)))))
+        
+
+
+    
