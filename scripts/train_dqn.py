@@ -6,8 +6,6 @@ from stable_baselines3.common.callbacks import BaseCallback, CallbackList
 from stable_baselines3.common.logger import configure
 
 import torch
-import wandb
-from wandb.integration.sb3 import WandbCallback
 from dqn.archs import DQNBasePolicy
 from dqn.callbacks import EvalCallbackCustom
 
@@ -17,16 +15,12 @@ from four_room.constants import train_config
 from four_room.wrappers import gym_wrapper_state
 
 import argparse
-import os
-import csv
-import dill
 import matplotlib.pyplot as plt
 from copy import deepcopy
 
 gym.register('MiniGrid-FourRooms-v1', FourRoomsEnv)
 
-from stable_baselines3.common.callbacks import BaseCallback, CallbackList
-from wandb.integration.sb3 import WandbCallback
+from stable_baselines3.common.callbacks import CallbackList
 
 def human_format(num):
     num = float('{:.3g}'.format(num))
@@ -106,19 +100,11 @@ if __name__ == "__main__":
         eval_env, 
         save_file_name=save_file_name,
         n_eval_episodes=num_train_configs, 
-        eval_freq=max(1000 // n_envs, 1), 
+        eval_freq=max(100_000 // n_envs, 1), 
         verbose=0,
         log_path=f"logging/"
     )
-    # wandb.init(
-    #     project="four-room-project",
-    #     sync_tensorboard=True,  
-    #     name=save_file_name,
-    #     group=group_name,
-    #     config=policy_kwargs,
-    # )
     
-    # wandb_callback = WandbCallback()
     callback = CallbackList([eval_callback])
 
     model = DQN(
