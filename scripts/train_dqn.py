@@ -134,5 +134,4 @@ if __name__ == "__main__":
     model.learn(total_timesteps=args.timesteps, callback=callback, progress_bar=True)
     train_env.close()
     eval_env.close()
-    wandb.finish()
     
