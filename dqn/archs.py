@@ -188,7 +188,7 @@ class DQNBaseAction(CustomQNetwork):
         
         if use_cnn:
             with torch.no_grad():
-                n_flatten = np.prod(self.layers[0](torch.as_tensor(observation_space.sample()[None]).float()).shape[1:])
+                n_flatten = np.prod(self.obs_layers[0](torch.as_tensor(observation_space.sample()[None]).float()).shape[1:])
         else: 
             n_flatten = hidden_layers[0]
             
