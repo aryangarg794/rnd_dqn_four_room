@@ -73,4 +73,5 @@ with open('configs/validation_unreachable.pl', 'rb') as file:
 with open('configs/state_to_q.pl', 'rb') as file:
     state_to_q = dill.load(file)
     
+state_to_q_np = np.load('configs/state_to_q_np.npy')
 size = 19

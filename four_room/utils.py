@@ -89,3 +89,15 @@ def obs_to_state(obs):
         assert False, f"Obs not correct shape: {obs.shape}"
         
 
+def reverse_doors(obs, size=19):
+    room_w = size // 2
+    room_h = size // 2
+    
+    doors = [0, 0, 0, 0]
+    
+    doors[0] = int(obs[6] - (0 * room_h) - 1)
+    doors[1] = int(obs[12] - (1 * room_h) - 1)
+    doors[2] = int(obs[7] - (0 * room_w) - 1)
+    doors[3] = int(obs[9] - (1 * room_w) - 1)
+    
+    return doors

@@ -201,8 +201,9 @@ class FourRoomsEnv(MiniGridEnv):
             # this moves the index for the next reset!!
             self._list_idx = (self._list_idx + 1) % self._list_size
         
-        self.valid_pos = [pos for pos in self.valid_pos if (pos != self.goal_pos and pos != self.agent_pos)]
-        
+        # self.valid_pos = [pos for pos in self.valid_pos if (pos != self.goal_pos and pos != self.agent_pos)]
+        self.valid_pos = [pos for pos in self.valid_pos if (pos != self.goal_pos)]
+
         for y in range(self.height):
             for x in range(self.height):
                 cell = self.grid.get(x, y)

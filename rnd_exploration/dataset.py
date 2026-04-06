@@ -296,7 +296,7 @@ class ReplayBufferBoot(ReplayBuffer):
         super().__init__(state_dim, num_actions, capacity, device)
         
         self.num_heads = num_heads
-        state_space = (self.capacity, *state_dim) if not use_state else (self.capacity, 9)
+        state_space = (self.capacity, *state_dim) if not use_state else (self.capacity, 13)
         self.states = torch.zeros(state_space, dtype=torch.float, device=self.device)
         self.next_states = torch.zeros(state_space, dtype=torch.float, device=self.device)
         self.masks = torch.zeros((capacity, num_heads), device=self.device)

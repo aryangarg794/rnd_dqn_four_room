@@ -9,15 +9,7 @@ from rnd_exploration.dataset import ReplayBufferBoot
 from four_room.arch import CNN
 from utils.episode import LastEpisode
 from four_room.utils import obs_to_state
-
-class L2Norm(nn.Module):
-    
-    def __init__(self, *args, **kwargs):
-        super().__init__(*args, **kwargs)
-    
-    def forward(self, x):
-        norm = torch.norm(x, dim=-1, keepdim=True) # (b, h) -> (b, h)
-        return x / norm
+from dqn.archs import UVUBase, L2Norm
 
 class UVUModule(nn.Module):
     
@@ -105,17 +97,18 @@ class UVUModule(nn.Module):
             nn.init.orthogonal_(layer.weight, std)
             nn.init.uniform_(layer.bias, -1, 1)
         
-    
 class UVU:
     
     def __init__(
         self,
         env: gym.Env, 
-        val_env: gym.Env, 
-        use_cnn: bool = True, 
+        val_env: gym.Env,  
+        use_cnn: bool = False, 
+        use_dual: bool = False,
+        use_action: bool = False,  
+        use_norm: bool = True, 
         capacity: int = int(1e5),
-        cnn_features: int = 512, 
-        gamma: float = 0.9, 
+        gamma: float = 0.99, 
         start_epsilon: float = 0.99,
         max_decay: float = 0.1,
         decay_steps: float = 10000,
@@ -126,44 +119,65 @@ class UVU:
         hidden_layers_g: list = [128],
         num_heads: int = 10, 
         device: str = 'cuda', 
-        residual: bool = True, 
         grad_norm: float = 10.0,
         scale_params: bool = False, 
         scale: float = 1.0, 
-        init: str = 'kaiming', 
-        use_state: bool = False, 
-        stack_linear: bool = False, 
+        init_func: str = 'kaiming',
         *args, 
         **kwargs
     ):
-        self.net = UVUModule(
-            env=env, 
+        # self.net = UVUModule(
+        #     env=env, 
+        #     use_cnn=use_cnn,
+        #     hidden_layers=hidden_layers,
+        #     cnn_features=cnn_features,
+        #     init=init,
+        #     act=act, 
+        #     scale=scale, 
+        #     num_heads=num_heads,
+        #     use_state=use_state,
+        # ).to(device)
+        
+        # self.target_net = deepcopy(self.net).to(device)
+        
+        # self.g = UVUModule(
+        #     env=env, 
+        #     use_cnn=use_cnn,
+        #     hidden_layers=hidden_layers_g,
+        #     cnn_features=cnn_features,
+        #     init=init,
+        #     act=act,
+        #     scale=scale, 
+        #     num_heads=num_heads,
+        #     use_state=use_state,
+        # ).to(device)
+
+        self.net = UVUBase(
+            observation_space=env.observation_space,
+            action_space=env.action_space,  
             use_cnn=use_cnn,
-            hidden_layers=hidden_layers,
-            cnn_features=cnn_features,
-            residual=residual,
-            init=init,
-            act=act, 
-            scale=scale, 
+            use_dual=use_dual, 
+            use_norm=use_norm,
+            use_action=use_action, 
+            init_func=init_func,
+            hidden_layers=hidden_layers, 
+            activation_fn=act,  
             num_heads=num_heads,
-            use_state=use_state,
-            stack_linear=stack_linear
         ).to(device)
         
         self.target_net = deepcopy(self.net).to(device)
         
-        self.g = UVUModule(
-            env=env, 
+        self.g = UVUBase(
+            observation_space=env.observation_space,
+            action_space=env.action_space,  
             use_cnn=use_cnn,
-            hidden_layers=hidden_layers_g,
-            cnn_features=cnn_features,
-            residual=residual,
-            init=init,
-            act=act,
-            scale=scale, 
+            use_norm=use_norm,
+            use_dual=use_dual,
+            use_action=use_action, 
+            init_func=init_func,
+            hidden_layers=hidden_layers_g, 
+            activation_fn=act,  
             num_heads=num_heads,
-            use_state=use_state,
-            stack_linear=stack_linear
         ).to(device)
         
         self.num_heads = num_heads
@@ -185,7 +199,7 @@ class UVU:
         
         self.buffer = ReplayBufferBoot(state_dim=env.observation_space.shape, 
                                    capacity=capacity, num_actions=env.action_space.n, 
-                                   device=device, num_heads=num_heads, use_state=use_state)
+                                   device=device, num_heads=num_heads, use_state=not use_cnn)
         
         self.optimizer = torch.optim.Adam(self.net.parameters(), lr=lr)
         
@@ -194,8 +208,8 @@ class UVU:
         self.grad_norm = grad_norm
         self.loss = nn.MSELoss()
         self.device = device
-        self.use_state = use_state
         self.scale = scale
+        self.use_cnn = use_cnn
         
     def __call__(self, state: torch.Tensor):
         return self.net(state) * self.scale 
@@ -207,9 +221,8 @@ class UVU:
            
            
     def get_obs(self, obs: np.ndarray):
-        if self.use_state:
-            state = obs_to_state(obs)
-            np_state = np.array(list(state))
+        if not self.use_cnn:
+            np_state = np.array(list(obs))
             return torch.from_numpy(np_state).view(1, len(np_state)).to(self.device).float()
         else:
             return torch.from_numpy(obs).to(device=self.device).unsqueeze(dim=0).float()

@@ -9,7 +9,27 @@ from stable_baselines3.common.policies import BasePolicy
 from stable_baselines3.common.torch_layers import BaseFeaturesExtractor
 
 from four_room.arch import ConvSequence
-from uvu.uvu import L2Norm
+
+
+def _kaiming_init(m):
+      if hasattr(m, 'weight'):
+        nn.init.kaiming_normal_(m.weight, nonlinearity='relu')
+        if hasattr(m, 'bias'):
+          nn.init.uniform_(m.bias, -1, 1)
+        
+def _orthogonal_init(layer, std=np.sqrt(2), bias_const=0.0):
+    if hasattr(layer, 'weight'):
+        nn.init.orthogonal_(layer.weight, std)
+        nn.init.uniform_(layer.bias, -1, 1)
+
+class L2Norm(nn.Module):
+    
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+    
+    def forward(self, x):
+        norm = torch.norm(x, dim=-1, keepdim=True) # (b, h) -> (b, h)
+        return x / norm
 
 class IdentityExtractor(BaseFeaturesExtractor):
     
@@ -84,6 +104,7 @@ class DQNBase(CustomQNetwork):
         max_pool: bool = True, 
         init: str = 'kaiming',
         act: nn.Module = nn.ReLU,
+        num_heads: int = 1, 
     ) -> None:
         print('using DQNBase')
         self.use_cnn = use_cnn
@@ -92,8 +113,7 @@ class DQNBase(CustomQNetwork):
             action_space=action_space,
             features_extractor=IdentityExtractor,
             features_dim=0,
-            normalize_images=False, 
-            use_action=False
+            normalize_images=False
         )
 
 
@@ -125,20 +145,9 @@ class DQNBase(CustomQNetwork):
                 act()
             ])
         
-        self.layers.extend([L2Norm() if norm else nn.Identity(), nn.Linear(hidden_layers[-1], action_space.n)]) 
+        self.layers.extend([L2Norm() if norm else nn.Identity(), nn.Linear(hidden_layers[-1], num_heads * action_space.n)]) 
 
-        self.apply(self._orthogonal_init if init == 'orthogonal' else self._kaiming_init)
-
-    def _kaiming_init(self, m):
-      if hasattr(m, 'weight'):
-        nn.init.kaiming_normal_(m.weight, nonlinearity='relu')
-        if hasattr(m, 'bias'):
-          nn.init.uniform_(m.bias, -1, 1)
-        
-    def _orthogonal_init(layer, std=np.sqrt(2), bias_const=0.0):
-        if hasattr(layer, 'weight'):
-            nn.init.orthogonal_(layer.weight, std)
-            nn.init.uniform_(layer.bias, -1, 1)
+        self.apply(_orthogonal_init if init == 'orthogonal' else _kaiming_init)
 
     def forward(self, obs):
         obs = obs.float()
@@ -155,13 +164,14 @@ class DQNBaseAction(CustomQNetwork):
         action_space: gym.spaces.Discrete,
         cnn_channels: int = 64, 
         use_cnn: bool = True,
-        embed_dim: int = 128, 
+        embed_dim: int = 64, 
         hidden_layers: list = [256, 512],
         norm: bool = True, 
         residual: bool = True, 
         max_pool: bool = True, 
         init: str = 'kaiming',
         act: nn.Module = nn.ReLU,
+        num_heads: int = 1,
     ) -> None:
         print('using DQNBaseAction')
         self.use_cnn = use_cnn
@@ -170,8 +180,7 @@ class DQNBaseAction(CustomQNetwork):
             action_space=action_space,
             features_extractor=IdentityExtractor,
             features_dim=0,
-            normalize_images=False, 
-            use_action=True
+            normalize_images=False,
         )
 
 
@@ -216,27 +225,16 @@ class DQNBaseAction(CustomQNetwork):
                 act()
             ])
         
-        self.layers.extend([L2Norm() if norm else nn.Identity(), nn.Linear(hidden_layers[-1], 1)]) 
+        self.layers.extend([L2Norm() if norm else nn.Identity(), nn.Linear(hidden_layers[-1], num_heads)]) 
 
         self.use_cnn = use_cnn
-        self.apply(self._orthogonal_init if init == 'orthogonal' else self._kaiming_init)
-
-    def _kaiming_init(self, m):
-      if hasattr(m, 'weight'):
-        nn.init.kaiming_normal_(m.weight, nonlinearity='relu')
-        if hasattr(m, 'bias'):
-          nn.init.uniform_(m.bias, -1, 1)
-        
-    def _orthogonal_init(layer, std=np.sqrt(2), bias_const=0.0):
-        if hasattr(layer, 'weight'):
-            nn.init.orthogonal_(layer.weight, std)
-            nn.init.uniform_(layer.bias, -1, 1)
+        self.apply(_orthogonal_init if init == 'orthogonal' else _kaiming_init)
 
     def _forward_act(self, obs, act):
         obs = obs.float()
         if self.use_cnn: 
             obs /= self.image_normaliser
-        act = self.act_embed(act).squeeze()
+        act = self.act_embed(act).squeeze(dim=1)
         act = self.act_layers(act)
         obs = self.obs_layers(obs)
         
@@ -255,7 +253,6 @@ class DQNBaseAction(CustomQNetwork):
 
 class DQNBaseDual(CustomQNetwork):
     
-    
     def __init__(
         self,
         observation_space: gym.spaces.Box, 
@@ -264,6 +261,7 @@ class DQNBaseDual(CustomQNetwork):
         norm: bool = True, 
         init: str = 'kaiming',
         act: nn.Module = nn.ReLU,
+        num_heads: int = 1,
     ) -> None:
         print('using DQNBaseDual')
         super().__init__(
@@ -281,13 +279,13 @@ class DQNBaseDual(CustomQNetwork):
         self.layers = nn.Sequential()
         
         self.obs_layers.extend([
-            nn.Linear(5, 128),
+            nn.Linear(3, 128),
             act(),
             nn.Linear(128, hidden_layers[0])
         ])
             
         self.context_layers.extend([
-            nn.Linear(8, 128),
+            nn.Linear(10, 128),
             act(),
             nn.Linear(128, hidden_layers[0])
         ])
@@ -304,24 +302,14 @@ class DQNBaseDual(CustomQNetwork):
                 act()
             ])
         
-        self.layers.extend([L2Norm() if norm else nn.Identity(), nn.Linear(hidden_layers[-1], action_space.n)]) 
+        self.layers.extend([L2Norm() if norm else nn.Identity(), nn.Linear(hidden_layers[-1], num_heads * action_space.n)]) 
         
-        self.apply(self._orthogonal_init if init == 'orthogonal' else self._kaiming_init)
-
-    def _kaiming_init(self, m):
-      if hasattr(m, 'weight'):
-        nn.init.kaiming_normal_(m.weight, nonlinearity='relu')
-        if hasattr(m, 'bias'):
-          nn.init.uniform_(m.bias, -1, 1)
-        
-    def _orthogonal_init(layer, std=np.sqrt(2), bias_const=0.0):
-        if hasattr(layer, 'weight'):
-            nn.init.orthogonal_(layer.weight, std)
-            nn.init.uniform_(layer.bias, -1, 1)
+        self.apply(_orthogonal_init if init == 'orthogonal' else _kaiming_init)
 
     def forward(self, obs):
-        agent_info = obs[:, :5]
-        context = obs[:, 5:]
+        obs = obs.float()
+        agent_info = obs[:, :3]
+        context = obs[:, 3:]
         agent_info = self.obs_layers(agent_info)
         context = self.context_layers(context)
         
@@ -336,11 +324,12 @@ class DQNBaseDualAction(CustomQNetwork):
         self,
         observation_space: gym.spaces.Box, 
         action_space: gym.spaces.Discrete,
-        embed_dim: int = 128, 
+        embed_dim: int = 64, 
         hidden_layers: list = [256, 512],
         norm: bool = True, 
         init: str = 'kaiming',
         act: nn.Module = nn.ReLU,
+        num_heads: int = 1, 
     ) -> None:
         print('using DQNDualAction')
         super().__init__(
@@ -359,13 +348,13 @@ class DQNBaseDualAction(CustomQNetwork):
         self.layers = nn.Sequential()
         
         self.obs_layers.extend([
-            nn.Linear(5, 128),
+            nn.Linear(3, 128),
             act(),
             nn.Linear(128, hidden_layers[0])
         ])
             
         self.context_layers.extend([
-            nn.Linear(8, 128),
+            nn.Linear(10, 128),
             act(),
             nn.Linear(128, hidden_layers[0])
         ])
@@ -389,26 +378,15 @@ class DQNBaseDualAction(CustomQNetwork):
                 act()
             ])
         
-        self.layers.extend([L2Norm() if norm else nn.Identity(), nn.Linear(hidden_layers[-1], 1)]) 
+        self.layers.extend([L2Norm() if norm else nn.Identity(), nn.Linear(hidden_layers[-1], num_heads)]) 
 
-        self.apply(self._orthogonal_init if init == 'orthogonal' else self._kaiming_init)
-
-    def _kaiming_init(self, m):
-      if hasattr(m, 'weight'):
-        nn.init.kaiming_normal_(m.weight, nonlinearity='relu')
-        if hasattr(m, 'bias'):
-          nn.init.uniform_(m.bias, -1, 1)
-        
-    def _orthogonal_init(layer, std=np.sqrt(2), bias_const=0.0):
-        if hasattr(layer, 'weight'):
-            nn.init.orthogonal_(layer.weight, std)
-            nn.init.uniform_(layer.bias, -1, 1)
+        self.apply(_orthogonal_init if init == 'orthogonal' else _kaiming_init)
 
     def _forward_act(self, obs, act):
-        agent_info = obs[:, :5]
-        context = obs[:, 5:]
+        agent_info = obs[:, :3]
+        context = obs[:, 3:]
         
-        act = self.act_embed(act).squeeze()
+        act = self.act_embed(act).squeeze(dim=1)
         act = self.act_layers(act)
         agent_info = self.obs_layers(agent_info)
         context = self.context_layers(context)
@@ -418,6 +396,7 @@ class DQNBaseDualAction(CustomQNetwork):
         return self.layers(inp)
     
     def forward(self, obs):
+        obs = obs.float()
         q_vals = []
         for act in range(self.action_space.n):
             action = torch.tensor([act], device=self.device, dtype=torch.long).repeat(obs.size(0), 1)
@@ -488,7 +467,68 @@ class DQNBasePolicy(DQNPolicy):
         return  model
     
     def forward(self, obs: torch.Tensor, deterministic: bool = True):
+        obs = obs.float()
         return self._predict(obs, deterministic=deterministic)
 
     def _predict(self, obs: torch.Tensor, deterministic: bool = True):
         return self.q_net._predict(obs, deterministic=deterministic)
+    
+class UVUBase(nn.Module):
+
+    def __init__(
+            self, 
+            observation_space, 
+            action_space, 
+            use_cnn = False, 
+            use_dual = False,
+            use_action = False,  
+            use_norm = True, 
+            init_func = 'kaiming', 
+            hidden_layers = list([256, 512]),
+            activation_fn = nn.ReLU, 
+            num_heads = 10,
+            scale = 1, 
+            *args, 
+            **kwargs
+        ):
+        super().__init__(*args, **kwargs)
+
+        self.use_dual = use_dual
+        self.use_cnn = use_cnn
+        self.use_action = use_action
+        self.use_norm = use_norm
+        self.init_func = init_func
+        self.num_heads = num_heads
+        self.num_actions = action_space.n
+
+        if self.use_dual:
+            if self.use_action:
+                model = DQNBaseDualAction(observation_space=observation_space, 
+                                          action_space=action_space, norm=self.use_norm,
+                                          init=self.init_func, act=activation_fn, num_heads=num_heads,
+                                          hidden_layers=hidden_layers)
+            else: 
+                model = DQNBaseDual(observation_space=observation_space, action_space=action_space, 
+                                    norm=self.use_norm, 
+                                    init=self.init_func, act=activation_fn, num_heads=num_heads,
+                                    hidden_layers=hidden_layers)
+        else:
+            if self.use_action:
+                model = DQNBaseAction(observation_space=observation_space, action_space=action_space, 
+                                      use_cnn=self.use_cnn, norm=self.use_norm, 
+                                      init=self.init_func, act=activation_fn, num_heads=num_heads,
+                                      hidden_layers=hidden_layers)
+            else:
+                model = DQNBase(observation_space=observation_space, action_space=action_space,
+                                use_cnn=self.use_cnn, norm=self.use_norm, 
+                                init=self.init_func, act=activation_fn, num_heads=num_heads,
+                                hidden_layers=hidden_layers)
+                
+        self.model = model
+        self.scale = scale
+    
+    def forward(self, x):
+        out = self.model(x)
+        out = out.view(-1, self.num_heads, self.num_actions)
+            
+        return out * self.scale

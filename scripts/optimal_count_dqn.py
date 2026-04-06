@@ -41,7 +41,7 @@ class Args:
     use_actions: bool = False
     device: str = 'cuda'
     
-def train_dqn_count(
+def train_opt_count(
     args: Args, 
     gamma: float = 0.99, 
     num_timesteps: int = int(2e5), 
@@ -53,7 +53,8 @@ def train_dqn_count(
     debug: bool = False,
     return_ones: bool = False,
     alt_explore: bool = False, 
-    eps: float = 0.05, 
+    eps_dqn: float = 0.05, 
+    eps_mode: float = 0.05, 
 ): 
     rms_dqn = RunningAverage(window_size=window)
     rms_un = RunningAverage(window_size=window)
@@ -92,9 +93,20 @@ def train_dqn_count(
     goal_pos = state[3:5]
     target_pos = state[3:5] # first phase is warmup
     aux_pos = None
+
+    mode = False
+    if np.random.random() < eps_mode:
+        mode = True # true = explorego, false = our heuristic version
     
     actions, path = aux_pos_multiple(state, env)
     aux_pos = (path[-1][0], path[-1][1])
+    if mode:
+        k = np.random.randint(low=0, high=len(path))
+        rand_state = path[k]
+        env.get_wrapper_attr('move_state')(rand_state)
+        target_pos = goal_pos
+        record = True
+
     
     ep_highlight_mask = np.zeros((len(train_config['agent positions']), 
                                         env.get_wrapper_attr('width'), env.get_wrapper_attr('height')), dtype=bool)
@@ -125,7 +137,7 @@ def train_dqn_count(
         
         if len(actions) != 0 and not alt_explore and not record:
             action = actions.pop(0)
-        elif np.random.random() < eps: 
+        elif np.random.random() < eps_dqn: 
             action = np.random.randint(low=0, high=3)
         else:
             q = state_to_q[State(state=obs)]
@@ -134,15 +146,16 @@ def train_dqn_count(
         
         with torch.no_grad():
             goal_action = state_to_q[State(obs)].argmax()
-            dqn_val = compute_q_value(obs, current_context, counter_moving, gamma)
+            dqn_val = compute_q_value(obs, goal_action, current_context, counter_moving, gamma)
             obj_tuple = tuple([int(item) for item in state])
             obj_tuple = (*obj_tuple, current_context)
             obj_moving_tuple = (current_context, *agent_pos, state[2])
             uncertainty = counter_moving[*obj_moving_tuple]
+            q = state_to_q[State(state=obs)]
             
         norm = (dqn_val - rms_dqn.avg)/rms_dqn.std
         
-        if (dqn_val - rms_dqn.avg >= alpha * rms_dqn.std or np.random.random() < eps) and not record: # swap to record mode 
+        if (dqn_val - rms_dqn.avg >= alpha * rms_dqn.std) and not record: # swap to record mode 
             switches += 1 
             heatmap_swap[current_context, agent_pos[0], agent_pos[1]] += 1
             record = True
@@ -154,7 +167,6 @@ def train_dqn_count(
         obs_prime, reward, terminated, truncated, _ = env.step(action)
         done = terminated or truncated
         
-        
         if not record:
             explore_heatmap[current_context, agent_pos[0], agent_pos[1]] += 1
         
@@ -164,6 +176,7 @@ def train_dqn_count(
         rms_norms.update(norm)
         
         if record:
+            assert np.array_equal(target_pos, goal_pos)
             # print(f'Timestep: {step} | Context: {current_context} | State: {agent_pos} | Dir: {state[2]} | Switch Count: {heatmap_swap[current_context, *agent_pos]} | Uncert: {uncertainty:.4f} | Count: {counter_moving.counts[*obj_moving_tuple]}')
             q = state_to_q[State(state=obs)]
             q_next = state_to_q[State(state=obs_prime)] if not done else placeholder
@@ -208,16 +221,23 @@ def train_dqn_count(
             state = obs_to_state(obs)
             goal_pos = state[3:5]
 
-            current_context = env.get_wrapper_attr('context')
+            mode = False
             record = False
-            trajs_added += 1
+            if np.random.random() < eps_mode:
+                mode = True 
             
             actions, path = aux_pos_multiple(state, env)
             aux_pos = (path[-1][0], path[-1][1])
-            
-            max_k = len(env.get_wrapper_attr('valid_pos'))
-            k = np.random.randint(low=0, high=max_k)
             target_pos = aux_pos
+            if mode:
+                k = np.random.randint(low=0, high=len(path))
+                rand_state = path[k]
+                env.get_wrapper_attr('move_state')(rand_state)
+                target_pos = goal_pos
+                record = True
+            
+            current_context = env.get_wrapper_attr('context')
+            trajs_added += 1
 
         if step % regression_freq == 0 and buffer.size >= buffer.capacity:
             lc, test_score = run_experiment(buffer, device=args.device)
@@ -242,8 +262,15 @@ def train_dqn_count(
         
         uniqueness.append(buffer.ratio_unique_trans)
         value = (dqn_val - rms_dqn.avg)/rms_dqn.std  
-        pbar.set_description(f"Training RND DQN | ")
-        # pbar.set_description(f"Training RND Count | Uniqueness: {agent.buffer.ratio_unique_trans:.4f} | Regression Exp: {(scores[-1] if len(scores) > 0 else 0):.4f} | Items added: {items_added} | Context: {current_context}")
+        stats = {
+            'uniqueness' : buffer.ratio_unique_trans,
+            'regression' : scores[-1] if len(scores) > 0 else 0,
+            'items_added' : items_added,
+            'current_context' : current_context, 
+            'value' : value
+        }
+        pbar.set_description(f"Training")
+        pbar.set_postfix(stats)
     
     return {
         'lc_curves': learning_curves, 
@@ -279,7 +306,8 @@ if __name__ == '__main__':
     parser.add_argument('--debug', action='store_true', help='debug mode')
     parser.add_argument('--return_ones', action='store_true', help='return ones')
     parser.add_argument('--alt', action='store_true', help='alt_explore')
-    parser.add_argument('-e', '--eps', type=float, default=0.05, help='eps')
+    parser.add_argument('-ed', '--eps_dqn', type=float, default=0.05, help='eps dqn')
+    parser.add_argument('-em', '--eps_mode', type=float, default=0.00, help='eps dqn')
     
     args = parser.parse_args()
     
@@ -328,7 +356,7 @@ if __name__ == '__main__':
     )
     
     
-    results = train_dqn_count(
+    results = train_opt_count(
         args=aux_args,
         num_timesteps=args.timesteps,
         seed=args.seed,
@@ -339,7 +367,8 @@ if __name__ == '__main__':
         window=args.window,
         return_ones=args.return_ones,
         alt_explore=args.alt,
-        eps=args.eps
+        eps_dqn=args.eps_dqn,
+        eps_mode=args.eps_mode,
     )
     
     with open(f'results/dqn_exps/{args.dir}_seed_{args.seed}_{args.timesteps}.pl', 'wb') as file:

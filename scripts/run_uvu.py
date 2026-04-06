@@ -15,9 +15,9 @@ from collections import deque
 
 from dqn.counter import MovingCountBasedUncertainty, CountBasedUncertainty
 from four_room.env import FourRoomsEnv
-from four_room.utils import obs_to_state
-from four_room.wrappers import gym_wrapper
-from four_room.constants import state_to_q
+from four_room.utils import obs_to_state, reverse_doors
+from four_room.wrappers import gym_wrapper_state
+from four_room.constants import state_to_q_np
 from rnd_exploration.utils import RunningAverage
 from four_room.constants import train_config, val_config, test_config, size
 from rnd_exploration.dataset import State
@@ -35,15 +35,23 @@ class Args:
     seed: int = 0
     lr_agent: float = 5e-4
     use_cnn: bool = False
-    use_state: bool = True
+    use_dual: bool = False
+    use_norm: bool = False
+    use_action: bool = False
     capacity: int = int(1e5)
+    init: str = 'kaiming'
     tau: float = 0.005
-    use_actions: bool = False
     device: str = 'cuda'
     gamma: float = 0.9
     grad_norm: float = 10.0
     num_heads: int = 512
-    
+
+def get_state(obs, use_cnn):
+    if use_cnn:
+        return obs_to_state(obs)
+    else:
+        first = [int(item) for item in obs[:5]]
+        return tuple(first + list(reverse_doors(obs)))
 
 def train_uvu_count(
     args: Args, 
@@ -59,7 +67,7 @@ def train_uvu_count(
     debug: bool = False,
     eps_mode: float = 0.05, 
     eps_dqn: float = 0.05,
-    gamma: float = 0.95, 
+    gamma: float = 0.99, 
 ): 
     rms_uvu = RunningAverage(window_size=window)
     rms_norms = RunningAverage(window_size=window)
@@ -86,12 +94,13 @@ def train_uvu_count(
         tau=args.tau,
         lr=args.lr_agent,
         device=args.device,
-        use_cnn=args.use_cnn,
-        cnn_features=512,
         hidden_layers=[512, 512, 512],
         hidden_layers_g=[512, 512, 512],
-        residual=True,
-        use_state=args.use_state,
+        use_cnn=args.use_cnn,
+        use_action=args.use_action, 
+        use_dual=args.use_dual, 
+        use_norm=args.use_norm, 
+        init_func=args.init, 
         num_heads=args.num_heads,
         gamma=gamma
     )
@@ -101,7 +110,7 @@ def train_uvu_count(
     
     obs, _ = env.reset()
     record = False
-    state = obs_to_state(obs)
+    state = get_state(obs, args.use_cnn)
     goal_pos = state[3:5]
     target_pos = state[3:5] # first phase is warmup
     aux_pos = None
@@ -151,7 +160,7 @@ def train_uvu_count(
     for step in (pbar := tqdm(range(1, num_timesteps+1), disable=debug)): 
         
         obs_torch = agent.get_obs(obs)
-        state = obs_to_state(obs)
+        state = get_state(obs, args.use_cnn)
         contexts.append(current_context)
         agent_pos = env.get_wrapper_attr('agent_pos')
         
@@ -160,18 +169,17 @@ def train_uvu_count(
         elif np.random.random() < eps_dqn: 
             action = np.random.randint(low=0, high=3)
         else:
-            q = state_to_q[State(state=obs)]
+            q = state_to_q_np[current_context, state[0], state[1], state[2]]
             action = q.argmax() if isinstance(q, np.ndarray) else np.array(q).argmax()
         
         with torch.no_grad():
-            goal_action = state_to_q[State(obs)].argmax()
+            goal_action = state_to_q_np[current_context, state[0], state[1], state[2]].argmax()
             goal_action = torch.tensor([goal_action], device=args.device).view(1, 1)
             uvu_val = agent.epistemic(obs_torch, goal_action).item()
             obj_tuple = tuple([int(item) for item in state])
             obj_tuple = (*obj_tuple, current_context)
             obj_moving_tuple = (current_context, *agent_pos, state[2])
-
-            q = state_to_q[State(state=obs)]
+            q = state_to_q_np[current_context, state[0], state[1], state[2]]
             
         norm = (uvu_val - rms_uvu.avg)/rms_uvu.std
         
@@ -197,14 +205,10 @@ def train_uvu_count(
         if step < warmupsteps or record:
             assert np.array_equal(target_pos, goal_pos) 
             # print(f'Timestep: {step} | Context: {current_context} | State: {agent_pos} | Dir: {state[2]} | Switch Count: {heatmap_swap[current_context, *agent_pos]} | Uncert: {uncertainty:.4f} | Count: {counter_moving.counts[*obj_moving_tuple]}')
-            q_next = state_to_q[State(state=obs_prime)] if not done else placeholder
+            state_prime = get_state(obs_prime, args.use_cnn)
+            q_next = state_to_q_np[current_context, state_prime[0], state_prime[1], state_prime[2]] if not done else placeholder
             next_action = q_next.argmax()
-            if done: 
-                prime_state = np.array((env.agent_pos[0], env.agent_pos[1], env.agent_dir, env.goal_pos[0], 
-                                env.goal_pos[0], *state[5:]))
-            else: 
-                prime_state = np.array(obs_to_state(obs_prime))
-            agent.buffer.update(np.array(obs_to_state(obs)), action, reward, prime_state, next_action, int(done), q_value=q)
+            agent.buffer.update(obs, action, reward, obs_prime, next_action, int(done), q_value=q)
             if render: 
                 ep_colors[current_context, agent_pos[0], agent_pos[1]] = (0, 0, 255)
                 ep_highlight_mask[current_context, agent_pos[0], agent_pos[1]] = True
@@ -221,7 +225,8 @@ def train_uvu_count(
             agent.buffer.update_seen(obj_moving_tuple)
             items_added += 1
         else:
-            q_next = state_to_q[State(state=obs_prime)] if not done else placeholder
+            state_prime = get_state(obs_prime, args.use_cnn)
+            q_next = state_to_q_np[current_context, state_prime[0], state_prime[1], state_prime[2]] if not done else placeholder
             next_action = q_next.argmax()
         
         if render and step >= num_timesteps - 1000:
@@ -247,7 +252,7 @@ def train_uvu_count(
             
             obs, _ = env.reset()
             done = False
-            state = obs_to_state(obs)
+            state = get_state(obs, args.use_cnn)
             goal_pos = state[3:5]
             
             mode = False
@@ -342,15 +347,18 @@ if __name__ == '__main__':
     parser.add_argument('-tau', '--tau', type=float, default=0.1, help='tau')
     parser.add_argument('-g', '--gamma', type=float, default=0.95, help='discount')
     parser.add_argument('--debug', action='store_true', help='debug mode')
-    parser.add_argument('--use_state', action='store_false', help='use state input')
-    parser.add_argument('--use_cnn', action='store_true', help='use cnn input')
     parser.add_argument('-ed', '--eps_dqn', type=float, default=0.05, help='eps dqn')
     parser.add_argument('-em', '--eps_mode', type=float, default=0.00, help='eps dqn')
     parser.add_argument('--grad_steps', type=int, default=10, help='num of grad steps')
+    parser.add_argument('--use_cnn', action='store_true', help='use cnn input')
+    parser.add_argument('--use_action', action='store_true', help='use cnn input')
+    parser.add_argument('--use_dual', action='store_true', help='use cnn input')
+    parser.add_argument('--use_norm', action='store_true', help='use norm input')
+    parser.add_argument('-i', '--init', type=str, default='kaiming', help='init function')
     
     args = parser.parse_args()
     
-    env = gym_wrapper(gym.make(
+    env = gym_wrapper_state(gym.make(
             'MiniGrid-FourRooms-v1', 
             agent_pos= train_config['agent positions'],
             goal_pos = train_config['goal positions'],
@@ -360,10 +368,10 @@ if __name__ == '__main__':
             render_mode='rgb_array',
             disable_env_checker=True
         ),
-        original_obs=True
+        use_cnn=args.use_cnn
     )
     
-    val_env = gym_wrapper(gym.make(
+    val_env = gym_wrapper_state(gym.make(
             'MiniGrid-FourRooms-v1', 
             agent_pos= val_config['agent positions'],
             goal_pos = val_config['goal positions'],
@@ -371,10 +379,10 @@ if __name__ == '__main__':
             agent_dir = val_config['agent directions'],
             size=size
         ),
-        original_obs=True
+        use_cnn=args.use_cnn,
     )
     
-    test_env = gym_wrapper(gym.make(
+    test_env = gym_wrapper_state(gym.make(
             'MiniGrid-FourRooms-v1', 
             agent_pos= test_config['agent positions'],
             goal_pos = test_config['goal positions'],
@@ -382,7 +390,7 @@ if __name__ == '__main__':
             agent_dir = test_config['agent directions'],
             size=size
         ),
-        original_obs=True
+        use_cnn=args.use_cnn
     )
     
     aux_args = Args(
@@ -394,8 +402,11 @@ if __name__ == '__main__':
        device=args.device,
        capacity=args.replaysize, 
        tau=args.tau,
-       use_state=args.use_state,
-       use_cnn=args.use_cnn
+       use_cnn=args.use_cnn,
+       use_action=args.use_action, 
+       use_dual=args.use_dual, 
+       use_norm=args.use_norm,
+       init=args.init
     )
     
     
