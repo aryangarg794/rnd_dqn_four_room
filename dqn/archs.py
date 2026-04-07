@@ -20,7 +20,8 @@ def _kaiming_init(m):
 def _orthogonal_init(layer, std=np.sqrt(2), bias_const=0.0):
     if hasattr(layer, 'weight'):
         nn.init.orthogonal_(layer.weight, std)
-        nn.init.uniform_(layer.bias, -1, 1)
+        if hasattr(layer, 'bias'):
+          nn.init.uniform_(layer.bias, -1, 1)
 
 class L2Norm(nn.Module):
     

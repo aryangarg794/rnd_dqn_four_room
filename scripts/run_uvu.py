@@ -334,7 +334,7 @@ if __name__ == '__main__':
     
     parser = argparse.ArgumentParser()
     parser.add_argument('-t', '--timesteps', type=int, default=int(3e5), help='timesteps')
-    parser.add_argument('-f', '--dir', type=str, default='uvu_test', help='save name')
+    parser.add_argument('-f', '--dir', type=str, default='uvu', help='save name')
     parser.add_argument('-a', '--alpha', type=float, default=1.0, help='alpha')
     parser.add_argument('-ag', '--lr_agent', type=float, default=1e-4, help='lr for dqn agent')
     parser.add_argument('-d', '--device', type=str, default='cuda', help='device')
@@ -342,7 +342,7 @@ if __name__ == '__main__':
     parser.add_argument('-s', '--replaysize', type=int, default=int(1e5), help='size of replay buffer')
     parser.add_argument('-seed', '--seed', type=int, default=0, help='seed')
     parser.add_argument('-b', '--batch_size', type=int, default=128, help='batch size')
-    parser.add_argument('-fr', '--freq', type=int, default=int(1e5), help='freq of regression')
+    parser.add_argument('-fr', '--freq', type=int, default=int(1e6), help='freq of regression')
     parser.add_argument('--window', type=int, default=3500, help='window size of rms_dqn')
     parser.add_argument('-tau', '--tau', type=float, default=0.1, help='tau')
     parser.add_argument('-g', '--gamma', type=float, default=0.95, help='discount')
@@ -392,10 +392,19 @@ if __name__ == '__main__':
         ),
         use_cnn=args.use_cnn
     )
+
+    name_cnn = '_cnn' if args.use_cnn else '_mlp'
+    name_norm = '_norm' if args.use_norm else ''
+    name_act = '_act' if args.use_action else ''
+    name_dual = '_dual' if args.use_dual else ''
+    name_init = '_' + args.init
+
+    group_name = f'{args.dir}{name_cnn}{name_act}{name_dual}{name_norm}{name_init}'
+    save_file_name = f'{group_name}_seed_{args.seed}'
     
     aux_args = Args(
        env=env, 
-       dir=args.dir,
+       dir=save_file_name,
        seed=args.seed,
        val_env=val_env, 
        lr_agent=args.lr_agent,
@@ -426,11 +435,11 @@ if __name__ == '__main__':
         gamma=args.gamma
     )
     
-    agent.save(f'{args.dir}_seed_{args.seed}_{args.timesteps}')
+    agent.save(f'{save_file_name}_{args.timesteps}')
     
-    with open(f'results/dqn_exps/{args.dir}_seed_{args.seed}_{args.timesteps}.pl', 'wb') as file:
+    with open(f'results/dqn_exps/{save_file_name}_{args.timesteps}.pl', 'wb') as file:
         dill.dump(results, file)
     
     if args.render:
         imgs = list(results['images'])
-        imageio.mimsave(f'renders/rendered_{args.dir}_seed_{args.seed}.gif', [np.array(img) for i, img in enumerate(imgs[-500:]) if i%1 == 0], duration=150)
+        imageio.mimsave(f'renders/rendered_{save_file_name}.gif', [np.array(img) for i, img in enumerate(imgs[-500:]) if i%1 == 0], duration=150)
