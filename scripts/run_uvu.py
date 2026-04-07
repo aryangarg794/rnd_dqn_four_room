@@ -342,7 +342,7 @@ if __name__ == '__main__':
     parser.add_argument('-s', '--replaysize', type=int, default=int(1e5), help='size of replay buffer')
     parser.add_argument('-seed', '--seed', type=int, default=0, help='seed')
     parser.add_argument('-b', '--batch_size', type=int, default=128, help='batch size')
-    parser.add_argument('-fr', '--freq', type=int, default=int(1e6), help='freq of regression')
+    parser.add_argument('-fr', '--freq', type=int, default=int(1e5), help='freq of regression')
     parser.add_argument('--window', type=int, default=3500, help='window size of rms_dqn')
     parser.add_argument('-tau', '--tau', type=float, default=0.1, help='tau')
     parser.add_argument('-g', '--gamma', type=float, default=0.95, help='discount')
