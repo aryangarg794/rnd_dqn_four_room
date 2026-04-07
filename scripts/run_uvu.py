@@ -52,7 +52,7 @@ def get_state(obs, use_cnn):
     else:
         first = [int(item) for item in obs[:5]]
         return tuple(first + list(reverse_doors(obs)))
-
+    
 def train_uvu_count(
     args: Args, 
     batch_size: int = 512,
@@ -349,7 +349,7 @@ if __name__ == '__main__':
     parser.add_argument('--debug', action='store_true', help='debug mode')
     parser.add_argument('-ed', '--eps_dqn', type=float, default=0.05, help='eps dqn')
     parser.add_argument('-em', '--eps_mode', type=float, default=0.00, help='eps dqn')
-    parser.add_argument('--grad_steps', type=int, default=10, help='num of grad steps')
+    parser.add_argument('--grad_steps', type=int, default=1, help='num of grad steps')
     parser.add_argument('--use_cnn', action='store_true', help='use cnn input')
     parser.add_argument('--use_action', action='store_true', help='use cnn input')
     parser.add_argument('--use_dual', action='store_true', help='use cnn input')

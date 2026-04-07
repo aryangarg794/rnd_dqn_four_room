@@ -10,17 +10,18 @@ from stable_baselines3.common.torch_layers import BaseFeaturesExtractor
 
 from four_room.arch import ConvSequence
 
-
+@torch.no_grad()
 def _kaiming_init(m):
       if hasattr(m, 'weight'):
         nn.init.kaiming_normal_(m.weight, nonlinearity='relu')
         if hasattr(m, 'bias'):
           nn.init.uniform_(m.bias, -1, 1)
-        
+
+@torch.no_grad()
 def _orthogonal_init(layer, std=np.sqrt(2), bias_const=0.0):
     if hasattr(layer, 'weight'):
         nn.init.orthogonal_(layer.weight, std)
-        if hasattr(layer, 'bias'):
+        if hasattr(layer, 'bias') and layer.bias is not None:
           nn.init.uniform_(layer.bias, -1, 1)
 
 class L2Norm(nn.Module):
@@ -153,7 +154,7 @@ class DQNBase(CustomQNetwork):
     def forward(self, obs):
         obs = obs.float()
         if self.use_cnn: 
-            obs /= self.image_normaliser
+            obs = obs / self.image_normaliser
         return self.layers(obs)
     
 
@@ -234,7 +235,7 @@ class DQNBaseAction(CustomQNetwork):
     def _forward_act(self, obs, act):
         obs = obs.float()
         if self.use_cnn: 
-            obs /= self.image_normaliser
+            obs = obs / self.image_normaliser
         act = self.act_embed(act).squeeze(dim=1)
         act = self.act_layers(act)
         obs = self.obs_layers(obs)

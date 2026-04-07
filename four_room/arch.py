@@ -9,7 +9,8 @@ import math
 def orthogonal_layer_init(layer, std=np.sqrt(2), bias_const=0.0):
     if hasattr(layer, 'weight'):
         th.nn.init.orthogonal_(layer.weight, std)
-        th.nn.init.constant_(layer.bias, bias_const)
+        if hasattr(layer, 'bias') and layer.bias is not None:
+            th.nn.init.constant_(layer.bias, bias_const)
     return layer
 
 def kaiming_layer_init(layer, std=np.sqrt(2), bias_const=0.0):
