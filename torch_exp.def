@@ -1,0 +1,16 @@
+Bootstrap: docker
+From: pytorch/pytorch:2.10.0-cuda13.0-cudnn9-runtime
+
+%post
+    apt-get update && apt-get install -y tree time vim ncdu speedtest-cli build-essential curl git-lfs python3-venv
+    git clone https://github.com/aryangarg794/rnd_dqn_four_room.git
+    
+    cd rnd_dqn_four_room 
+    git lfs pull
+    python -m venv .venv
+    . .venv/bin/activate
+    pip install -r requirements.txt --no-cache-dir
+    pip install -e . 
+    
+    apt-get clean && rm -rf /var/lib/apt/lists/*
+    echo '. "/rnd_dqn_four_room/.venv/bin/activate"' >> $APPTAINER_ENVIRONMENT

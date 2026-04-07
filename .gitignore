@@ -182,3 +182,6 @@ results/dqn_exps
 /results/videos
 /results/plots
 /results/pickles
+pyvenv.cfg
+lib64
+bin
