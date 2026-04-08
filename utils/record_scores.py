@@ -8,10 +8,11 @@ from dqn.model import DQN
 from uvu.uvu import UVU
 from rnd_exploration.rnd import RNDNetwork
 from rnd_exploration.dataset import State
-from four_room.wrappers import gym_wrapper
+from four_room.wrappers import gym_wrapper, gym_wrapper_state
 from four_room.utils import obs_to_state
-from four_room.constants import train_config, size, state_to_q
+from four_room.constants import train_config, size, state_to_q, state_to_q_np
 from utils.q_values import compute_q_value
+from scripts.run_uvu import get_state
 
 
 @torch.no_grad()
@@ -165,9 +166,9 @@ def record_dqn_scores(agent: DQN, current_env: int, env_range: int = 5, device: 
 
     
 @torch.no_grad()
-def record_uvu_scores(agent: UVU, current_env: int, env_range: int = 5, device: str = 'cuda', render: bool = False):
+def record_uvu_scores(agent: UVU, current_env: int, env_range: int = 5, device: str = 'cuda', render: bool = False, use_cnn: bool = False):
     env_ids = list(range(current_env-env_range, current_env+env_range+1))
-    env = gym_wrapper(gym.make(
+    env = gym_wrapper_state(gym.make(
             'MiniGrid-FourRooms-v1', 
             agent_pos= train_config['agent positions'],
             goal_pos = train_config['goal positions'],
@@ -177,7 +178,7 @@ def record_uvu_scores(agent: UVU, current_env: int, env_range: int = 5, device: 
             render_mode='rgb_array',
             disable_env_checker=True
         ),
-        original_obs=True
+        use_cnn=use_cnn
     )
     
     agent.net.eval()
@@ -195,11 +196,11 @@ def record_uvu_scores(agent: UVU, current_env: int, env_range: int = 5, device: 
             
             for _ in range(4): # for each direction we want to store the state-q value pair
                 obs, _, _, _, _ = env.step(1)
-                state = obs_to_state(obs)
+                state = get_state(obs, use_cnn)
                 agent_dir = state[2]
                 
                 obs_torch = agent.get_obs(obs)
-                goal_action = state_to_q[State(obs)].argmax()
+                goal_action = state_to_q_np[env_id, *state[:3]].argmax()
                 goal_action = torch.from_numpy(np.array([goal_action])).to(device=device).unsqueeze(dim=0)
                 dqn_val = agent.epistemic(obs_torch, goal_action)
                 results[agent_dir, idx, *valid_state] = dqn_val

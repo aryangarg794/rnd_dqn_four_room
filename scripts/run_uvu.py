@@ -398,8 +398,9 @@ if __name__ == '__main__':
     name_act = '_act' if args.use_action else ''
     name_dual = '_dual' if args.use_dual else ''
     name_init = '_' + args.init
+    name_alpha = '_alpha' + str(args.alpha).replace('.', '') 
 
-    group_name = f'{args.dir}{name_cnn}{name_act}{name_dual}{name_norm}{name_init}'
+    group_name = f'{args.dir}{name_cnn}{name_act}{name_dual}{name_norm}{name_init}_{name_alpha}'
     save_file_name = f'{group_name}_seed_{args.seed}'
     
     aux_args = Args(

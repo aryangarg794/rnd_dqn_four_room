@@ -9,8 +9,8 @@ from copy import deepcopy
 from PIL import Image
 
 from four_room.env import FourRoomsEnv
-from four_room.constants import train_config, size, state_to_q
-from four_room.wrappers import gym_wrapper
+from four_room.constants import train_config, size, state_to_q, state_to_q_np
+from four_room.wrappers import gym_wrapper, gym_wrapper_state
 from four_room.shortest_path import find_all_shortest_paths, compute_actions
 from four_room.utils import obs_to_state
 from rnd_exploration.dataset import State
@@ -20,14 +20,16 @@ from rnd_exploration.rnd import RNDNetwork
 from uvu.uvu import UVU
 from utils.q_values import compute_q_value
 from utils.record_scores import record_dqn_scores, get_rnd_scores, get_q_optimal, record_uncertainty_scores, record_uvu_scores
+from scripts.run_uvu import get_state
+
 gym.register('MiniGrid-FourRooms-v1', FourRoomsEnv)
 
 
 @torch.no_grad()
 def simulate_trajectory(file_name: str, alpha: float = 1.0, device: str = 'cuda', rnd: bool = False, optimal: bool = False,
-                        scale: int = 1, normalized: bool = True):
+                        scale: int = 1, normalized: bool = True, use_cnn: bool = False):
     
-    env = gym_wrapper(gym.make(
+    env = gym_wrapper_state(gym.make(
                 'MiniGrid-FourRooms-v1', 
                 agent_pos=train_config['agent positions'],
                 goal_pos=train_config['goal positions'],
@@ -37,7 +39,7 @@ def simulate_trajectory(file_name: str, alpha: float = 1.0, device: str = 'cuda'
                 render_mode='rgb_array',
                 disable_env_checker=True
             ),
-            original_obs=True
+            use_cnn=use_cnn
         )
     
     with open(f'results/dqn_exps/{file_name}.pl', 'rb') as file:
@@ -50,8 +52,6 @@ def simulate_trajectory(file_name: str, alpha: float = 1.0, device: str = 'cuda'
     explore_map = results['explore_heatmap']
     switch_map = results['heatmap']
     
-    agent = DQN(env, deepcopy(env), hidden_layers=[50, 50], device=device)
-    
     random_context = np.random.randint(0, 199)
     env.get_wrapper_attr('set_context')(random_context)
     obs, _ = env.reset()
@@ -62,7 +62,7 @@ def simulate_trajectory(file_name: str, alpha: float = 1.0, device: str = 'cuda'
         dqn_scores, _, dqn_scores_dirs = get_q_optimal(counter, random_context, 0, 0.99)
     elif file_name[0:3] == "uvu":
         agent = UVU(env, deepcopy(env), hidden_layers=[512, 512, 512], hidden_layers_g=[512, 512, 512], 
-                    num_heads=512, use_state=True, use_cnn=False, device=device)
+                    num_heads=512, use_cnn=use_cnn, use_dual=True, use_norm=True, use_action=True, device=device)
         agent.load(file_name)
         agent.net.eval()
         dqn_scores, _, dqn_scores_dirs = record_uvu_scores(agent, random_context, 0)
@@ -70,6 +70,7 @@ def simulate_trajectory(file_name: str, alpha: float = 1.0, device: str = 'cuda'
         dqn_scores_dirs = dqn_scores_dirs / scale
         uvu = True
     else:
+        agent = DQN(env, deepcopy(env), hidden_layers=[50, 50], device=device)
         agent.net.load_state_dict(torch.load(f'results/models/{file_name}.pt', weights_only=True))
         agent.net.eval()
         dqn_scores, _, dqn_scores_dirs = record_dqn_scores(agent, random_context, 0)
@@ -86,8 +87,7 @@ def simulate_trajectory(file_name: str, alpha: float = 1.0, device: str = 'cuda'
     k = np.random.randint(low=0, high=max_k)
     aux_pos = env.get_wrapper_attr('valid_pos')[k]
     
-    
-    state = obs_to_state(obs)
+    state = get_state(obs, False)
     goal_pos = state[3:5]
     paths = find_all_shortest_paths(state[:2], state[2], aux_pos, state[5:], size)
     path_index = np.random.randint(low=0, high=len(paths))
@@ -121,15 +121,15 @@ def simulate_trajectory(file_name: str, alpha: float = 1.0, device: str = 'cuda'
         
         step += 1
         agent_pos = env.get_wrapper_attr('agent_pos')
-        
+        state = get_state(obs, use_cnn)
+
         if np.array_equal(target_pos, aux_pos) and not np.array_equal(agent_pos, aux_pos):
             action = actions.pop(0)
         else:
-            state_obj = State(state=obs)
-            q = state_to_q[state_obj]
+            q = state_to_q_np[random_context, *state[:3]]
             action = q.argmax() if isinstance(q, np.ndarray) else np.array(q).argmax()
             
-        goal_action = state_to_q[State(obs)].argmax()
+        goal_action = state_to_q_np[random_context, *state[:3]].argmax()
         if optimal:
             dqn_val = compute_q_value(obs, random_context, counter, 0.99, goal_action)
             norm = (dqn_val - rms_dqn.avg)/rms_dqn.std 
@@ -146,7 +146,7 @@ def simulate_trajectory(file_name: str, alpha: float = 1.0, device: str = 'cuda'
 
         if dqn_val - rms_dqn.avg >= alpha * rms_dqn.std and not record:
             relevant_buffer[*obj_moving_tuple] += 1
-            agent.buffer.update_seen(obj_tuple)
+            agent.buffer.update_seen((*obj_moving_tuple, state[2]))
             record = True
             target_pos = goal_pos
             action = goal_action
@@ -156,7 +156,7 @@ def simulate_trajectory(file_name: str, alpha: float = 1.0, device: str = 'cuda'
         
         if record:
             relevant_buffer[*obj_moving_tuple] += 1
-            agent.buffer.update_seen(obj_tuple)
+            agent.buffer.update_seen((*obj_moving_tuple, state[2]))
         
         
         # render logic
@@ -281,8 +281,9 @@ if __name__ == '__main__':
     parser.add_argument('-o', '--opt', action='store_true', help='optimal mode')
     parser.add_argument('-f', '--dir', type=str, default='dqn_count_test', help='save name')
     parser.add_argument('-un', '--unnorm', action='store_false', help='optimal mode')
+    parser.add_argument('--use_cnn', action='store_true', help='optimal mode')
     parser.add_argument('-s', '--scale', type=int, default=1, help='scale')
     
     args = parser.parse_args()
     
-    simulate_trajectory(args.dir, rnd=args.rnd, optimal=args.opt, normalized=args.unnorm, scale=args.scale)
+    simulate_trajectory(args.dir, rnd=args.rnd, optimal=args.opt, normalized=args.unnorm, scale=args.scale, use_cnn=args.use_cnn)

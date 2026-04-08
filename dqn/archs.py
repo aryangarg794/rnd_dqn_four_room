@@ -228,6 +228,7 @@ class DQNBaseAction(CustomQNetwork):
             ])
         
         self.layers.extend([L2Norm() if norm else nn.Identity(), nn.Linear(hidden_layers[-1], num_heads)]) 
+        self.num_heads = num_heads
 
         self.use_cnn = use_cnn
         self.apply(_orthogonal_init if init == 'orthogonal' else _kaiming_init)
@@ -236,6 +237,7 @@ class DQNBaseAction(CustomQNetwork):
         obs = obs.float()
         if self.use_cnn: 
             obs = obs / self.image_normaliser
+
         act = self.act_embed(act).squeeze(dim=1)
         act = self.act_layers(act)
         obs = self.obs_layers(obs)
@@ -245,12 +247,12 @@ class DQNBaseAction(CustomQNetwork):
         return self.layers(inp)
     
     def forward(self, obs):
-        q_vals = []
-        for act in range(self.action_space.n):
-            action = torch.tensor([act], device=self.device, dtype=torch.long).repeat(obs.size(0), 1)
-            q_vals.append(self._forward_act(obs, action))
+        obs = obs.float()
+        batched_input = obs.repeat(self.action_space.n, *[1 for _ in range(len(self.observation_space.shape))])
+        batched_act = torch.arange(0, self.action_space.n, device=obs.device).repeat_interleave(obs.size(0)).reshape(-1, 1)
+        q_vals = self._forward_act(batched_input, batched_act)
         
-        return torch.cat(q_vals, dim=-1)
+        return q_vals.view(obs.size(0), self.action_space.n * self.num_heads)
             
 
 class DQNBaseDual(CustomQNetwork):
@@ -399,12 +401,11 @@ class DQNBaseDualAction(CustomQNetwork):
     
     def forward(self, obs):
         obs = obs.float()
-        q_vals = []
-        for act in range(self.action_space.n):
-            action = torch.tensor([act], device=self.device, dtype=torch.long).repeat(obs.size(0), 1)
-            q_vals.append(self._forward_act(obs, action))
-            
-        return torch.cat(q_vals, dim=-1)
+        batched_input = obs.repeat(self.action_space.n, *[1 for _ in range(len(self.observation_space.shape))])
+        batched_act = torch.arange(0, self.action_space.n, device=obs.device).repeat_interleave(obs.size(0)).reshape(-1, 1)
+        q_vals = self._forward_act(batched_input, batched_act)
+        
+        return q_vals.view(obs.size(0), self.action_space.n * self.num_heads)
     
     
 class DQNBasePolicy(DQNPolicy):

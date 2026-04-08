@@ -301,7 +301,6 @@ class ReplayBufferBoot(ReplayBuffer):
         self.next_states = torch.zeros(state_space, dtype=torch.float, device=self.device)
         self.masks = torch.zeros((capacity, num_heads), device=self.device)
         
-        
     def sample(self, batch_size: int = 256):
         ind = torch.randint(0, self.size, device=self.device, size=(batch_size,))
         batch_torch = (
