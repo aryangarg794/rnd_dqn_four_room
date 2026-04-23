@@ -6,12 +6,14 @@ import numpy as np
 import gymnasium as gym
 import math
 
+
 def orthogonal_layer_init(layer, std=np.sqrt(2), bias_const=0.0):
-    if hasattr(layer, 'weight'):
+    if hasattr(layer, "weight"):
         th.nn.init.orthogonal_(layer.weight, std)
-        if hasattr(layer, 'bias') and layer.bias is not None:
+        if hasattr(layer, "bias") and layer.bias is not None:
             th.nn.init.constant_(layer.bias, bias_const)
     return layer
+
 
 def kaiming_layer_init(layer, std=np.sqrt(2), bias_const=0.0):
     th.nn.init.kaiming_uniform_(layer.weight, a=math.sqrt(5))
@@ -22,19 +24,50 @@ def kaiming_layer_init(layer, std=np.sqrt(2), bias_const=0.0):
             th.nn.init.uniform_(layer.bias, -bound, bound)
     return layer
 
+
 class ResidualBlock(nn.Module):
-    def __init__(self, channels, act = nn.LeakyReLU, init_function='orthogonal', residual=True):
+    def __init__(
+        self, channels, act=nn.LeakyReLU, init_function="orthogonal", residual=True
+    ):
         super().__init__()
-        if init_function == 'orthogonal':
-            self.conv0 = orthogonal_layer_init(nn.Conv2d(in_channels=channels, out_channels=channels, kernel_size=3, padding=1))
-            self.conv1 = orthogonal_layer_init(nn.Conv2d(in_channels=channels, out_channels=channels, kernel_size=3, padding=1))
-        elif init_function == 'kaiming':
-            self.conv0 = kaiming_layer_init(nn.Conv2d(in_channels=channels, out_channels=channels, kernel_size=3, padding=1))
-            self.conv1 = kaiming_layer_init(nn.Conv2d(in_channels=channels, out_channels=channels, kernel_size=3, padding=1))
-            
+        if init_function == "orthogonal":
+            self.conv0 = orthogonal_layer_init(
+                nn.Conv2d(
+                    in_channels=channels,
+                    out_channels=channels,
+                    kernel_size=3,
+                    padding=1,
+                )
+            )
+            self.conv1 = orthogonal_layer_init(
+                nn.Conv2d(
+                    in_channels=channels,
+                    out_channels=channels,
+                    kernel_size=3,
+                    padding=1,
+                )
+            )
+        elif init_function == "kaiming":
+            self.conv0 = kaiming_layer_init(
+                nn.Conv2d(
+                    in_channels=channels,
+                    out_channels=channels,
+                    kernel_size=3,
+                    padding=1,
+                )
+            )
+            self.conv1 = kaiming_layer_init(
+                nn.Conv2d(
+                    in_channels=channels,
+                    out_channels=channels,
+                    kernel_size=3,
+                    padding=1,
+                )
+            )
+
         self.residual = residual
         self.act = act()
-    
+
     def forward(self, x):
         inputs = x
         x = self.act(x)
@@ -42,21 +75,47 @@ class ResidualBlock(nn.Module):
         x = self.act(x)
         x = self.conv1(x)
         return x + inputs if self.residual else x
-        
+
 
 class ConvSequence(nn.Module):
-    def __init__(self, input_shape, out_channels, act = nn.LeakyReLU, max_pool=True, init_function='orthogonal', residual=True):
+    def __init__(
+        self,
+        input_shape,
+        out_channels,
+        act=nn.LeakyReLU,
+        max_pool=True,
+        init_function="orthogonal",
+        residual=True,
+    ):
         super().__init__()
         self.max_pool = max_pool
         self._input_shape = input_shape
         self._out_channels = out_channels
-        if init_function == 'orthogonal':
-            self.conv = orthogonal_layer_init(nn.Conv2d(in_channels=self._input_shape[0], out_channels=self._out_channels, kernel_size=3, padding=1))
-        elif init_function == 'kaiming':
-            self.conv = kaiming_layer_init(nn.Conv2d(in_channels=self._input_shape[0], out_channels=self._out_channels, kernel_size=3, padding=1))
+        if init_function == "orthogonal":
+            self.conv = orthogonal_layer_init(
+                nn.Conv2d(
+                    in_channels=self._input_shape[0],
+                    out_channels=self._out_channels,
+                    kernel_size=3,
+                    padding=1,
+                )
+            )
+        elif init_function == "kaiming":
+            self.conv = kaiming_layer_init(
+                nn.Conv2d(
+                    in_channels=self._input_shape[0],
+                    out_channels=self._out_channels,
+                    kernel_size=3,
+                    padding=1,
+                )
+            )
 
-        self.res_block0 = ResidualBlock(self._out_channels, init_function=init_function, residual=residual, act=act)
-        self.res_block1 = ResidualBlock(self._out_channels, init_function=init_function, residual=residual, act=act)
+        self.res_block0 = ResidualBlock(
+            self._out_channels, init_function=init_function, residual=residual, act=act
+        )
+        self.res_block1 = ResidualBlock(
+            self._out_channels, init_function=init_function, residual=residual, act=act
+        )
 
     def forward(self, x):
         x = self.conv(x)
@@ -64,7 +123,9 @@ class ConvSequence(nn.Module):
             x = nn.functional.max_pool2d(x, kernel_size=3, stride=2, padding=1)
         x = self.res_block0(x)
         x = self.res_block1(x)
-        assert x.shape[1:] == self.get_output_shape(), f"{x.shape[1:]} != {self.get_output_shape()}"
+        assert (
+            x.shape[1:] == self.get_output_shape()
+        ), f"{x.shape[1:]} != {self.get_output_shape()}"
         return x
 
     def get_output_shape(self):
@@ -87,30 +148,51 @@ class CNN(BaseFeaturesExtractor):
         This corresponds to the number of unit for the last layer.
     """
 
-    def __init__(self, observation_space: gym.spaces.Box, act = nn.LeakyReLU, features_dim: int = 64, load_file = None, freeze_linear = False, 
-                 init_function='orthogonal', residual=True):
+    def __init__(
+        self,
+        observation_space: gym.spaces.Box,
+        act=nn.LeakyReLU,
+        features_dim: int = 64,
+        load_file=None,
+        freeze_linear=False,
+        init_function="orthogonal",
+        residual=True,
+    ):
         super().__init__(observation_space, features_dim)
         # We assume CxHxW images (channels first)
         # Re-ordering will be done by pre-preprocessing or wrapper
         n_input_channels = observation_space.shape[0]
         self.image_normaliser = 10
         # self.image_normaliser = 1.0
-        
+
         # conv_seq1 = ConvSequence(observation_space.shape, 64, max_pool=True, residual=residual, init_function=init_function)
         # conv_seq2 = ConvSequence(conv_seq1.get_output_shape(), 64, max_pool=True, residual=residual, init_function=init_function)
         # self.cnn = nn.Sequential(conv_seq1, conv_seq2)
-        self.cnn = ConvSequence(observation_space.shape, 64, act=act, max_pool=True, init_function=init_function, residual=residual)
-
+        self.cnn = ConvSequence(
+            observation_space.shape,
+            64,
+            act=act,
+            max_pool=True,
+            init_function=init_function,
+            residual=residual,
+        )
 
         # Compute shape by doing one forward pass
         with th.no_grad():
-            n_flatten = np.prod(self.cnn(th.as_tensor(observation_space.sample()[None]).float()).shape[1:])
+            n_flatten = np.prod(
+                self.cnn(th.as_tensor(observation_space.sample()[None]).float()).shape[
+                    1:
+                ]
+            )
 
-        if init_function == 'orthogonal':
-            self.linear = nn.Sequential(orthogonal_layer_init(nn.Linear(n_flatten, features_dim)), nn.ReLU())
-        elif init_function == 'kaiming':
-            self.linear = nn.Sequential(kaiming_layer_init(nn.Linear(n_flatten, features_dim)), nn.ReLU())
-
+        if init_function == "orthogonal":
+            self.linear = nn.Sequential(
+                orthogonal_layer_init(nn.Linear(n_flatten, features_dim)), nn.ReLU()
+            )
+        elif init_function == "kaiming":
+            self.linear = nn.Sequential(
+                kaiming_layer_init(nn.Linear(n_flatten, features_dim)), nn.ReLU()
+            )
 
     def forward(self, observations: th.Tensor) -> th.Tensor:
         observations = observations / self.image_normaliser

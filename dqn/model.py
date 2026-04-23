@@ -1,4 +1,4 @@
-import torch 
+import torch
 import torch.nn as nn
 import numpy as np
 import gymnasium as gym
@@ -16,124 +16,139 @@ class DQNModule(nn.Module):
     def __init__(
         self,
         env: gym.Env,
-        use_cnn: bool = True, 
-        cnn_features: int = 512, 
+        use_cnn: bool = True,
+        cnn_features: int = 512,
         hidden_layers: list = [256, 256],
-        residual: bool = True, 
+        residual: bool = True,
         *args,
         **kwargs
     ) -> None:
         super().__init__(*args, **kwargs)
 
-        self.num_actions = env.action_space.n 
+        self.num_actions = env.action_space.n
 
         self.layers = nn.Sequential()
-        
+
         if use_cnn:
-            self.layers.extend([
-                CNN(observation_space=env.observation_space, features_dim=cnn_features, residual=residual),
-                nn.ReLU(),
-            ])
+            self.layers.extend(
+                [
+                    CNN(
+                        observation_space=env.observation_space,
+                        features_dim=cnn_features,
+                        residual=residual,
+                    ),
+                    nn.ReLU(),
+                ]
+            )
         else:
-            self.layers.extend([
-                nn.Linear(np.prod(env.observation_space.shape), cnn_features)
-            ])
-            
-        self.layers.extend([
-            nn.Linear(cnn_features, hidden_layers[0]),
-            nn.ReLU()
-        ])
-        
+            self.layers.extend(
+                [nn.Linear(np.prod(env.observation_space.shape), cnn_features)]
+            )
+
+        self.layers.extend([nn.Linear(cnn_features, hidden_layers[0]), nn.ReLU()])
+
         for layer1, layer2 in zip(hidden_layers[:-1], hidden_layers[1:]):
-            self.layers.extend([
-                nn.Linear(layer1, layer2), 
-                nn.ReLU()
-            ])
-            
+            self.layers.extend([nn.Linear(layer1, layer2), nn.ReLU()])
+
         self.layers.append(nn.Linear(hidden_layers[-1], self.num_actions))
 
         self.apply(self.orthogonal_layer_init)
 
     def _init(self, m):
-      if isinstance(m, (nn.Linear)):
-        nn.init.kaiming_normal_(m.weight, nonlinearity='relu')
-        if m.bias is not None:
-          nn.init.zeros_(m.bias)
+        if isinstance(m, (nn.Linear)):
+            nn.init.kaiming_normal_(m.weight, nonlinearity="relu")
+            if m.bias is not None:
+                nn.init.zeros_(m.bias)
 
     def forward(self, x):
         return self.layers(x)
 
     def orthogonal_layer_init(layer, std=np.sqrt(2), bias_const=0.0):
-        if hasattr(layer, 'weight'):
+        if hasattr(layer, "weight"):
             torch.nn.init.orthogonal_(layer.weight, std)
             torch.nn.init.constant_(layer.bias, bias_const)
         return layer
-        
+
+
 class DQN:
-    
+
     def __init__(
         self,
-        env: gym.Env, 
-        val_env: gym.Env, 
-        use_cnn: bool = True, 
+        env: gym.Env,
+        val_env: gym.Env,
+        use_cnn: bool = True,
         capacity: int = int(1e5),
-        cnn_features: int = 512, 
+        cnn_features: int = 512,
         start_epsilon: float = 0.99,
         max_decay: float = 0.1,
         decay_steps: float = 10000,
         lr: float = 5e-4,
         tau: float = 0.005,
         hidden_layers: list = [256, 256],
-        device: str = 'cuda', 
-        residual: bool = True, 
-        *args, 
+        device: str = "cuda",
+        residual: bool = True,
+        *args,
         **kwargs
     ):
         self.net = DQNModule(
-            env=env, 
+            env=env,
             use_cnn=use_cnn,
             hidden_layers=hidden_layers,
             cnn_features=cnn_features,
-            residual=residual
+            residual=residual,
         ).to(device)
-        
+
         self.target_net = deepcopy(self.net).to(device)
-        
+
         self.env = env
         self.val_env = val_env
         self.start_epsilon = start_epsilon
         self.max_decay = max_decay
         self.decay_steps = decay_steps
         self.epsilon = start_epsilon
-        
-        self.buffer = ReplayBuffer(state_dim=env.observation_space.shape, 
-                                   capacity=capacity, num_actions=env.action_space.n, device=device)
+
+        self.buffer = ReplayBuffer(
+            state_dim=env.observation_space.shape,
+            capacity=capacity,
+            num_actions=env.action_space.n,
+            device=device,
+        )
         self.optimizer = torch.optim.Adam(self.net.parameters(), lr=lr)
-        
+
         self.tau = tau
         self.device = device
-        
+
     def soft_update(self):
         with torch.no_grad():
-            for param, target_param in zip(self.net.parameters(), self.target_net.parameters()):
-                target_param.data.copy_(self.tau * param.data + (1-self.tau) * target_param.data)
-           
+            for param, target_param in zip(
+                self.net.parameters(), self.target_net.parameters()
+            ):
+                target_param.data.copy_(
+                    self.tau * param.data + (1 - self.tau) * target_param.data
+                )
+
     def eval(self, num_runs: int = 10, seed: int = 0):
         self.net.eval()
         rewards = []
         for _ in range(num_runs):
             obs, _ = self.val_env.reset(seed=seed)
             done = False
-            ep_reward = 0 
-            
+            ep_reward = 0
+
             while not done:
                 with torch.no_grad():
-                    obs_torch = torch.as_tensor(obs, dtype=torch.float).view(1, -1).to(self.device)
+                    obs_torch = (
+                        torch.as_tensor(obs, dtype=torch.float)
+                        .view(1, -1)
+                        .to(self.device)
+                    )
                     action = self.net(obs_torch).view(-1).cpu().numpy().argmax()
-                    
-                    obs_prime, reward, terminated, truncated, _ = self.val_env.step(action)
+
+                    obs_prime, reward, terminated, truncated, _ = self.val_env.step(
+                        action
+                    )
                     ep_reward += reward
-                    
+
                     obs = obs_prime
                     done = terminated or truncated
 
@@ -141,10 +156,10 @@ class DQN:
 
         self.net.train()
         return np.mean(rewards)
-    
+
     def __call__(self, state: torch.Tensor):
         return self.net(state)
-    
+
     # only need this for testing
     def epsilon_greedy(self, state, dim=1):
         rng = np.random.random()
@@ -155,10 +170,12 @@ class DQN:
         else:
             with torch.no_grad():
                 q_values = self.net(state)
-            
+
             action = torch.argmax(q_values, dim=dim)
 
         return action
 
     def epsilon_decay(self, step):
-        self.epsilon = self.max_decay + (self.start_epsilon - self.max_decay) * max(0, (self.decay_steps - step) / self.decay_steps)
+        self.epsilon = self.max_decay + (self.start_epsilon - self.max_decay) * max(
+            0, (self.decay_steps - step) / self.decay_steps
+        )

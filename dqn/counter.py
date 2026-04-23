@@ -1,55 +1,56 @@
-import numpy as np 
+import numpy as np
 import torch
 import random
 
 from collections import defaultdict, deque
 
+
 class CountBasedUncertainty:
-    
-    def __init__(
-        self,
-        capacity: int,
-        device: str = 'cuda'
-    ):
+
+    def __init__(self, capacity: int, device: str = "cuda"):
         self.capacity = capacity
         self.states = deque(maxlen=capacity)
         self.counts = defaultdict(int)
         self.device = device
         self.counts_matrix = np.zeros((200, 19, 19, 4))
         self.eps = 1e-1
-        
-    
+
     def __getitem__(self, key: tuple):
-        return 1/(np.sqrt(self.counts[key]) + self.eps)
-        
+        return 1 / (np.sqrt(self.counts[key]) + self.eps)
+
     def add(self, state_repr: tuple):
         self.counts[state_repr] += 1
         self.states.append(state_repr)
-        self.counts_matrix[state_repr[-1], state_repr[0], state_repr[1], state_repr[2]] += 1
-        
+        self.counts_matrix[
+            state_repr[-1], state_repr[0], state_repr[1], state_repr[2]
+        ] += 1
+
     def sample(self, batch_size: int = 256):
         ind = np.random.randint(low=0, high=len(self.states), size=(batch_size,))
         torch_ind = torch.tensor(ind, dtype=torch.int64)
         sampled_states = [self.states[i] for i in ind]
-        batch_rewards = torch.tensor([self[k] for k in sampled_states]).to(self.device) + self.eps
-        
+        batch_rewards = (
+            torch.tensor([self[k] for k in sampled_states]).to(self.device) + self.eps
+        )
+
         return batch_rewards.unsqueeze(dim=-1), torch_ind
-    
+
+
 class MovingCountBasedUncertainty:
-    
+
     def __init__(
         self,
         capacity: int,
-        device: str = 'cuda',
+        device: str = "cuda",
         return_ones: bool = True,
-        dir: bool = True
+        dir: bool = True,
     ):
         self.capacity = capacity
         self.states = np.empty((capacity,), dtype=object)
         self.all_states = []
         self.pointer = 0
         if dir:
-            self.counts = np.zeros((200, 19, 19, 4)) #NOTE: Hard coded
+            self.counts = np.zeros((200, 19, 19, 4))  # NOTE: Hard coded
         else:
             self.counts = np.zeros((200, 19, 19))
         self.device = device
@@ -57,39 +58,45 @@ class MovingCountBasedUncertainty:
         self.eps = 1e-1
         self.return_ones = return_ones
         self.dir = dir
-        self.max_val = 1 if return_ones else 1/(np.sqrt(0) + self.eps)
-    
+        self.max_val = 1 if return_ones else 1 / (np.sqrt(0) + self.eps)
+
     def __getitem__(self, state_repr: tuple):
         if self.return_ones:
             return 0 if self.counts[*state_repr] > 0 else 1
         else:
-            return 1/(np.sqrt(self.counts[*state_repr]) + self.eps)
-        
+            return 1 / (np.sqrt(self.counts[*state_repr]) + self.eps)
+
     def add(self, state_repr: tuple, timestep: int = None):
         self.all_states.append((timestep, *state_repr))
         if self.size == self.capacity:
             stale_repr = self.states[self.pointer]
             self.counts[*stale_repr] = max(0, self.counts[*stale_repr] - 1)
-        
+
         self.states[self.pointer] = state_repr
         self.counts[*state_repr] += 1
-        self.pointer = (self.pointer + 1) % self.capacity 
+        self.pointer = (self.pointer + 1) % self.capacity
         self.size = min(self.size + 1, self.capacity)
-        
+
         if self.size >= self.capacity:
             assert self.counts.sum() == self.capacity
-        
+
     def sample(self, batch_size: int = 256):
         ind = np.random.randint(low=0, high=self.size, size=(batch_size,))
         torch_ind = torch.tensor(ind, dtype=torch.int64)
         sampled_states = [self.states[i] for i in ind]
-        batch_rewards = torch.tensor([self[*k] for k in sampled_states], dtype=torch.float32).to(self.device) + self.eps
-        
+        batch_rewards = (
+            torch.tensor([self[*k] for k in sampled_states], dtype=torch.float32).to(
+                self.device
+            )
+            + self.eps
+        )
+
         return batch_rewards.unsqueeze(dim=-1), torch_ind
 
     @property
     def counts_no_dir(self):
         return self.counts.sum(axis=-1) if self.dir else self.counts
+
 
 if __name__ == "__main__":
     import numpy as np
@@ -127,7 +134,9 @@ if __name__ == "__main__":
         # Overflow: s1 should be removed
         m.add(s4)
 
-        assert m.counts[s1] == 0, f"s1 should have been removed, got count={m.counts[s1]}"
+        assert (
+            m.counts[s1] == 0
+        ), f"s1 should have been removed, got count={m.counts[s1]}"
         assert m.counts[s2] == 1, "s2 should still be present"
         assert m.counts[s3] == 1, "s3 should still be present"
         assert m.counts[s4] == 1, "s4 should have count=1"

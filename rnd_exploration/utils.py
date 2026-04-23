@@ -2,6 +2,7 @@ import numpy as np
 from collections import deque
 import dill
 
+
 def compare(a, b):
 
     els = np.sum(a != b)
@@ -27,14 +28,13 @@ class RunningAverage:
         if len(self.values) > 0:
             return float(np.mean(self.values))
         return 0.0
-    
+
     @property
     def std(self):
         if len(self.values) > 1:
             std = float(np.std(self.values))
             return std if std > 0 else 1.0
         return 1.0
-    
+
     def reset(self):
         self.values.clear()
-        

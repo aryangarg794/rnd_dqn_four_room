@@ -14,13 +14,21 @@ COLORS = {
     "purple": np.array([112, 39, 195]),
     "yellow": np.array([255, 255, 0]),
     "grey": np.array([100, 100, 100]),
-    "light_red": np.array([255, 51, 51])
+    "light_red": np.array([255, 51, 51]),
 }
 
 COLOR_NAMES = sorted(list(COLORS.keys()))
 
 # Used to map colors to integers
-COLOR_TO_IDX = {"red": 0, "green": 1, "blue": 2, "purple": 3, "yellow": 4, "grey": 5, "light_red": 6}
+COLOR_TO_IDX = {
+    "red": 0,
+    "green": 1,
+    "blue": 2,
+    "purple": 3,
+    "yellow": 4,
+    "grey": 5,
+    "light_red": 6,
+}
 
 IDX_TO_COLOR = dict(zip(COLOR_TO_IDX.values(), COLOR_TO_IDX.keys()))
 
@@ -37,7 +45,7 @@ OBJECT_TO_IDX = {
     "goal": 8,
     "lava": 9,
     "agent": 10,
-    "aux": 11, 
+    "aux": 11,
 }
 
 IDX_TO_OBJECT = dict(zip(OBJECT_TO_IDX.values(), OBJECT_TO_IDX.keys()))
@@ -61,17 +69,17 @@ DIR_TO_VEC = [
     np.array((0, -1)),
 ]
 
-with open('configs/train.pl', 'rb') as file:
+with open("configs/train.pl", "rb") as file:
     train_config = dill.load(file)
 
-with open('configs/test_unreachable.pl', 'rb') as file:
+with open("configs/test_unreachable.pl", "rb") as file:
     test_config = dill.load(file)
 
-with open('configs/validation_unreachable.pl', 'rb') as file:
+with open("configs/validation_unreachable.pl", "rb") as file:
     val_config = dill.load(file)
-    
-with open('configs/state_to_q.pl', 'rb') as file:
+
+with open("configs/state_to_q.pl", "rb") as file:
     state_to_q = dill.load(file)
-    
-state_to_q_np = np.load('configs/state_to_q_np.npy')
+
+state_to_q_np = np.load("configs/state_to_q_np.npy")
 size = 19

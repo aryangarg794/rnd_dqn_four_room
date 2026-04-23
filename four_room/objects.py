@@ -23,6 +23,7 @@ if TYPE_CHECKING:
 
 Point = Tuple[int, int]
 
+
 class WorldObj:
     """
     Base class for grid world objects
@@ -105,14 +106,15 @@ class WorldObj:
     def render(self, r: np.ndarray) -> np.ndarray:
         """Draw this object with the given renderer"""
         raise NotImplementedError
-    
+
+
 class AuxGoal(WorldObj):
-    
+
     def __init__(self, color: str = "light_red"):
         super().__init__("aux", color)
-        
+
     def can_overlap(self):
         return True
-    
+
     def render(self, img):
-        fill_coords(img, point_in_rect(0, 1, 0, 1), COLORS[self.color])  
+        fill_coords(img, point_in_rect(0, 1, 0, 1), COLORS[self.color])

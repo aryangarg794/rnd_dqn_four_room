@@ -1,4 +1,4 @@
-import os 
+import os
 import numpy as np
 import warnings
 import dill
@@ -6,23 +6,28 @@ import dill
 from collections import defaultdict
 from stable_baselines3.common.evaluation import evaluate_policy
 from stable_baselines3.common.callbacks import EventCallback
-from stable_baselines3.common.vec_env import DummyVecEnv, VecEnv, sync_envs_normalization
+from stable_baselines3.common.vec_env import (
+    DummyVecEnv,
+    VecEnv,
+    sync_envs_normalization,
+)
 from stable_baselines3.common.utils import safe_mean
+
 
 class EvalCallbackCustom(EventCallback):
 
     def __init__(
         self,
         eval_env,
-        save_file_name, 
-        callback_on_new_best = None,
-        callback_after_eval = None,
+        save_file_name,
+        callback_on_new_best=None,
+        callback_after_eval=None,
         n_eval_episodes: int = 5,
         eval_freq: int = 10000,
-        log_path = None,
-        best_model_save_path = None,
+        log_path=None,
+        best_model_save_path=None,
         deterministic: bool = True,
-        log_interval: int = 4, 
+        log_interval: int = 4,
         render: bool = False,
         verbose: int = 1,
         warn: bool = True,
@@ -66,7 +71,10 @@ class EvalCallbackCustom(EventCallback):
     def _init_callback(self) -> None:
         # Does not work in some corner cases, where the wrapper is not the same
         if not isinstance(self.training_env, type(self.eval_env)):
-            warnings.warn("Training and eval env are not of the same type" f"{self.training_env} != {self.eval_env}")
+            warnings.warn(
+                "Training and eval env are not of the same type"
+                f"{self.training_env} != {self.eval_env}"
+            )
 
         # Create folders if needed
         if self.best_model_save_path is not None:
@@ -97,10 +105,17 @@ class EvalCallbackCustom(EventCallback):
     def _on_step(self) -> bool:
         continue_training = True
         new_eps = self.model._episode_num - self._last_recorded_episode
-        if self.model._episode_num > self._last_recorded_episode and self.model._episode_num >= 4: 
+        if (
+            self.model._episode_num > self._last_recorded_episode
+            and self.model._episode_num >= 4
+        ):
             self._last_recorded_episode = self.model._episode_num
-            self.results["train/ep_rew_mean"].append(safe_mean([ep_info["r"] for ep_info in self.model.ep_info_buffer]))
-            self.results["train/ep_len_mean"].append(safe_mean([ep_info["l"] for ep_info in self.model.ep_info_buffer]))
+            self.results["train/ep_rew_mean"].append(
+                safe_mean([ep_info["r"] for ep_info in self.model.ep_info_buffer])
+            )
+            self.results["train/ep_len_mean"].append(
+                safe_mean([ep_info["l"] for ep_info in self.model.ep_info_buffer])
+            )
             self.results["train/total_timesteps"].append(self.num_timesteps)
 
         if self.eval_freq > 0 and self.n_calls % self.eval_freq == 0:
@@ -149,36 +164,45 @@ class EvalCallbackCustom(EventCallback):
                 )
 
             mean_reward, std_reward = np.mean(episode_rewards), np.std(episode_rewards)
-            mean_ep_length, std_ep_length = np.mean(episode_lengths), np.std(episode_lengths)
+            mean_ep_length, std_ep_length = np.mean(episode_lengths), np.std(
+                episode_lengths
+            )
             self.last_mean_reward = mean_reward
 
             if self.verbose >= 1:
-                print(f"Eval num_timesteps={self.num_timesteps}, " f"episode_reward={mean_reward:.2f} +/- {std_reward:.2f}")
+                print(
+                    f"Eval num_timesteps={self.num_timesteps}, "
+                    f"episode_reward={mean_reward:.2f} +/- {std_reward:.2f}"
+                )
                 print(f"Episode length: {mean_ep_length:.2f} +/- {std_ep_length:.2f}")
             # Add to current Logger
             self.logger.record("eval/mean_reward", float(mean_reward))
             self.logger.record("eval/mean_ep_length", mean_ep_length)
-            
-            self.results['eval/mean_reward'].append(float(mean_reward))
-            self.results['eval/mean_ep_length'].append(mean_ep_length)
+
+            self.results["eval/mean_reward"].append(float(mean_reward))
+            self.results["eval/mean_ep_length"].append(mean_ep_length)
 
             if len(self._is_success_buffer) > 0:
                 success_rate = np.mean(self._is_success_buffer)
                 if self.verbose >= 1:
                     print(f"Success rate: {100 * success_rate:.2f}%")
                 self.logger.record("eval/success_rate", success_rate)
-                self.results['eval/success_rate'].append(success_rate)
+                self.results["eval/success_rate"].append(success_rate)
 
             # Dump log so the evaluation results are printed with the correct timestep
-            self.logger.record("time/total_timesteps", self.num_timesteps, exclude="tensorboard")
-            self.results['time/total_timesteps'].append(self.num_timesteps)
+            self.logger.record(
+                "time/total_timesteps", self.num_timesteps, exclude="tensorboard"
+            )
+            self.results["time/total_timesteps"].append(self.num_timesteps)
             self.logger.dump(self.num_timesteps)
 
             if mean_reward > self.best_mean_reward:
                 if self.verbose >= 1:
                     print("New best mean reward!")
                 if self.best_model_save_path is not None:
-                    self.model.save(os.path.join(self.best_model_save_path, "best_model"))
+                    self.model.save(
+                        os.path.join(self.best_model_save_path, "best_model")
+                    )
                 self.best_mean_reward = mean_reward
                 # Trigger callback on new best model, if needed
                 if self.callback_on_new_best is not None:
@@ -187,16 +211,16 @@ class EvalCallbackCustom(EventCallback):
             # Trigger callback after every evaluation, if needed
             if self.callback is not None:
                 continue_training = continue_training and self._on_event()
-                
+
         return continue_training
-    
+
     def _on_training_end(self):
         if self.verbose >= 1:
             print("Training finished. Saving final results...")
-            
-        with open(f'results/dqn_evals/eval_{self.save_name}.pl', 'wb') as file:
+
+        with open(f"results/dqn_evals/eval_{self.save_name}.pl", "wb") as file:
             dill.dump(self.results, file)
-        return 
+        return
 
     def update_child_locals(self, locals_) -> None:
         """

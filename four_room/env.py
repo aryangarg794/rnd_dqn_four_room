@@ -7,8 +7,8 @@ from itertools import product
 import random
 from typing import Any
 
-class FourRoomsEnv(MiniGridEnv):
 
+class FourRoomsEnv(MiniGridEnv):
     """
     ### Description
 
@@ -53,61 +53,74 @@ class FourRoomsEnv(MiniGridEnv):
     2. Timeout (see `max_steps`).
 
     """
+
     @staticmethod
     def valid_positions(size):
         """
-            generate a list of allowed agent positions and goal positions
-            to make sampling from it easier
+        generate a list of allowed agent positions and goal positions
+        to make sampling from it easier
         """
         valid_agent_pos = list()
         valid_goal_pos = list()
 
         # loop through the 4 rooms:
-        for i in range(0,2):
-            for j in range(0,2):
+        for i in range(0, 2):
+            for j in range(0, 2):
                 # every room has (size // 2 - 1)**2 possible locations
-                for k in range(0,size // 2 - 1):
-                    for l in range(0,size // 2 - 1):
-                        pos = (i*(size // 2) + 1 + k, j*(size // 2) + 1 + l)
+                for k in range(0, size // 2 - 1):
+                    for l in range(0, size // 2 - 1):
+                        pos = (i * (size // 2) + 1 + k, j * (size // 2) + 1 + l)
                         valid_agent_pos.append(pos)
                         valid_goal_pos.append(pos)
 
-        valid_doors_pos = list(product(list(range(0, size//2 - 1)), repeat=4))
-        
+        valid_doors_pos = list(product(list(range(0, size // 2 - 1)), repeat=4))
+
         return valid_agent_pos, valid_goal_pos, valid_doors_pos
 
-
-    def __init__(self, agent_pos=None, agent_dir=None, goal_pos=None, doors_pos=None, max_steps=100, size=19, **kwargs):
+    def __init__(
+        self,
+        agent_pos=None,
+        agent_dir=None,
+        goal_pos=None,
+        doors_pos=None,
+        max_steps=100,
+        size=19,
+        **kwargs,
+    ):
         """
-            Parameters
-            ----------
-            agent_pos : list
-                List of 2-tuples containing agent starting locations
-            agent_dir : list
-                List of integers containing agent directions (in range [0,3])
-            goal_pos : list
-                List of 2-tuples containing goal locations
-            doors_pos : list
-                List of 4-tuples containing door locations
-                Locations are integers in the range [0,2] and in order of wall segments: (up, down, left right)
-            max_steps : int
-                Number of steps after which to timeout the agent
+        Parameters
+        ----------
+        agent_pos : list
+            List of 2-tuples containing agent starting locations
+        agent_dir : list
+            List of integers containing agent directions (in range [0,3])
+        goal_pos : list
+            List of 2-tuples containing goal locations
+        doors_pos : list
+            List of 4-tuples containing door locations
+            Locations are integers in the range [0,2] and in order of wall segments: (up, down, left right)
+        max_steps : int
+            Number of steps after which to timeout the agent
         """
         self._agent_pos_list = agent_pos
         self._goal_pos_list = goal_pos
         self._doors_pos_list = doors_pos
         self._agent_dir_list = agent_dir
-        
+
         # an index into agent_pos, goal_pos and doors_pos with which we will initialise the environment
         self._list_idx = 0
         self._current_context = 0
 
-        if (agent_pos is not None) and (agent_dir is not None) and (goal_pos is not None) and (doors_pos is not None):
+        if (
+            (agent_pos is not None)
+            and (agent_dir is not None)
+            and (goal_pos is not None)
+            and (doors_pos is not None)
+        ):
             self._list_size = len(self._agent_pos_list)
             assert len(self._agent_dir_list) == self._list_size
             assert len(self._goal_pos_list) == self._list_size
             assert len(self._doors_pos_list) == self._list_size
-
 
         self.size = size
         mission_space = MissionSpace(mission_func=lambda: "reach the goal")
@@ -118,23 +131,39 @@ class FourRoomsEnv(MiniGridEnv):
             height=self.size,
             max_steps=max_steps,
             highlight=True,
-            **kwargs
+            **kwargs,
         )
-        
+
         self.walls_list = []
 
-    def reset(self, *, seed: int | None = None, options: dict[str, Any] | None = None,):
+    def reset(
+        self,
+        *,
+        seed: int | None = None,
+        options: dict[str, Any] | None = None,
+    ):
         if seed and self._agent_pos_list is not None:
             random.seed(seed)
-            self._list_idx = random.randint(0, len(self._agent_pos_list)-1)
+            self._list_idx = random.randint(0, len(self._agent_pos_list) - 1)
 
             # shuffle the order of the configurations
             # this ensures a different seed will encounter the training configurations in a different order
-            initial_configurations = list(zip(self._agent_pos_list, self._agent_dir_list, self._goal_pos_list, self._doors_pos_list))
+            initial_configurations = list(
+                zip(
+                    self._agent_pos_list,
+                    self._agent_dir_list,
+                    self._goal_pos_list,
+                    self._doors_pos_list,
+                )
+            )
             random.shuffle(initial_configurations)
-            self._agent_pos_list, self._agent_dir_list, self._goal_pos_list, self._doors_pos_list = zip(*[i for i in initial_configurations])
+            (
+                self._agent_pos_list,
+                self._agent_dir_list,
+                self._goal_pos_list,
+                self._doors_pos_list,
+            ) = zip(*[i for i in initial_configurations])
         return super().reset(seed=seed, options=options)
-
 
     def _gen_grid(self, width, height):
         self._current_context = self._list_idx
@@ -154,11 +183,16 @@ class FourRoomsEnv(MiniGridEnv):
             doors_pos = self._doors_pos_list[self._list_idx]
             agent_dir = self._agent_dir_list[self._list_idx]
         else:
-            doors_pos = (self._rand_int(0, (self.size // 2 - 1)), self._rand_int(0, (self.size // 2 - 1)), self._rand_int(0, (self.size // 2 - 1)), self._rand_int(0, (self.size // 2 - 1)))
+            doors_pos = (
+                self._rand_int(0, (self.size // 2 - 1)),
+                self._rand_int(0, (self.size // 2 - 1)),
+                self._rand_int(0, (self.size // 2 - 1)),
+                self._rand_int(0, (self.size // 2 - 1)),
+            )
             agent_dir = self._rand_int(0, 4)
 
         self.valid_pos = self.valid_positions(self.size)[0]
-        
+
         # For each row of rooms
         for j in range(0, 2):
             # For each column or rooms
@@ -200,7 +234,7 @@ class FourRoomsEnv(MiniGridEnv):
             # assumes _gen_grid() is only called once when reset() is called
             # this moves the index for the next reset!!
             self._list_idx = (self._list_idx + 1) % self._list_size
-        
+
         # self.valid_pos = [pos for pos in self.valid_pos if (pos != self.goal_pos and pos != self.agent_pos)]
         self.valid_pos = [pos for pos in self.valid_pos if (pos != self.goal_pos)]
 
@@ -208,25 +242,25 @@ class FourRoomsEnv(MiniGridEnv):
             for x in range(self.height):
                 cell = self.grid.get(x, y)
                 if cell is not None:
-                    self.walls_list.append((x, y)) 
-    
+                    self.walls_list.append((x, y))
+
     def move_valid_pos(self, idx):
         self.agent_pos = self.valid_pos[idx]
         self.grid.set(*self.agent_pos, None)
         self.agent_dir = 0
-        
+
     @property
     def context(self):
         return self._current_context
-    
+
     def set_context(self, idx):
         assert idx < self._list_size
         self._list_idx = idx
         # self.reset() # CALL RESET AFTER USING THIS FUNC
-        
+
     def walls(self):
         return self.walls_list
-        
+
     def move_state(self, state):
         if len(state) == 2:
             self.agent_pos = state
@@ -236,30 +270,35 @@ class FourRoomsEnv(MiniGridEnv):
             self.agent_pos = state[0:2]
             self.grid.set(*self.agent_pos, None)
             self.agent_dir = int(state[2])
-        
+
     def set_aux(self, aux_pos):
         aux = AuxGoal()
         self.put_obj(aux, *aux_pos)
-        
+
     def context_info(self, idx):
-        return self._agent_pos_list[idx], self._doors_pos_list[idx], self._goal_pos_list[idx]
-    
+        return (
+            self._agent_pos_list[idx],
+            self._doors_pos_list[idx],
+            self._goal_pos_list[idx],
+        )
+
     def remove_aux(self, aux_pos):
         self.grid.set(aux_pos[0], aux_pos[1], None)
-        
-    def render(self, highlight_mask=None, colors=None, agent_col=(255, 0, 0), target_pos=None):
-        return super().render(highlight_mask, colors, agent_col, target_pos)
-        
-class FourRoomsNoRotateEnv(FourRoomsEnv):
-    
 
+    def render(
+        self, highlight_mask=None, colors=None, agent_col=(255, 0, 0), target_pos=None
+    ):
+        return super().render(highlight_mask, colors, agent_col, target_pos)
+
+
+class FourRoomsNoRotateEnv(FourRoomsEnv):
     """
     ### Description
 
     Classic four room reinforcement learning environment. The agent must
     navigate in a maze composed of four rooms interconnected by 4 gaps in the
-    walls. To obtain a reward, the agent must reach the green goal square. 
-    The agent is randomly placed in any of the four rooms and the goal is always 
+    walls. To obtain a reward, the agent must reach the green goal square.
+    The agent is randomly placed in any of the four rooms and the goal is always
     in the lower right room.
 
     ### Mission Space
@@ -302,6 +341,7 @@ class FourRoomsNoRotateEnv(FourRoomsEnv):
     - `MiniGrid-FourRooms-v0`
 
     """
+
     @staticmethod
     def valid_positions(size):
         # generate a list of allowed agent positions and goal positions
@@ -311,20 +351,20 @@ class FourRoomsNoRotateEnv(FourRoomsEnv):
 
         # goal can only be in the lower right room
         # every room has (size // 2 - 1)**2 possible locations
-        for k in range(0,size // 2 - 1):
-            for l in range(0,size // 2 - 1):
+        for k in range(0, size // 2 - 1):
+            for l in range(0, size // 2 - 1):
                 pos = ((size // 2) + 1 + k, (size // 2) + 1 + l)
                 valid_goal_pos.append(pos)
 
         # agent can be in any of the 4 rooms
-        for i in range(0,2):
-            for j in range(0,2):
+        for i in range(0, 2):
+            for j in range(0, 2):
                 # every room has (size // 2 - 1)**2 possible locations
-                for k in range(0,size // 2 - 1):
-                    for l in range(0,size // 2 - 1):
-                        pos = (i*(size // 2) + 1 + k, j*(size // 2) + 1 + l)
+                for k in range(0, size // 2 - 1):
+                    for l in range(0, size // 2 - 1):
+                        pos = (i * (size // 2) + 1 + k, j * (size // 2) + 1 + l)
                         valid_agent_pos.append(pos)
 
-        valid_doors_pos = list(product(list(range(0, size//2 - 1)), repeat=4))
-        
+        valid_doors_pos = list(product(list(range(0, size // 2 - 1)), repeat=4))
+
         return valid_agent_pos, valid_goal_pos, valid_doors_pos

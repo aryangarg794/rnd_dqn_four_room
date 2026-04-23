@@ -702,8 +702,6 @@ class MiniGridEnv(gym.Env):
 
         #         # Mark this cell to be highlighted
         #         highlight_mask[abs_i, abs_j] = True
-        
-        
 
         # Render the whole grid
         img = self.grid.render(
@@ -712,7 +710,7 @@ class MiniGridEnv(gym.Env):
             self.agent_dir,
             highlight_mask=highlight_mask if highlight else None,
             colors=colors if highlight else None,
-            agent_col=agent_col
+            agent_col=agent_col,
         )
 
         return img
@@ -724,7 +722,7 @@ class MiniGridEnv(gym.Env):
         agent_pov: bool = False,
         highlight_mask: np.ndarray | None = None,
         colors: np.ndarray | None = None,
-        agent_col: tuple = (255, 0, 0)
+        agent_col: tuple = (255, 0, 0),
     ):
         """Returns an RGB image corresponding to the whole environment or the agent's point of view.
 
@@ -743,10 +741,19 @@ class MiniGridEnv(gym.Env):
         if agent_pov:
             return self.get_pov_render(tile_size)
         else:
-            return self.get_full_render(highlight, tile_size, highlight_mask, colors, agent_col)
+            return self.get_full_render(
+                highlight, tile_size, highlight_mask, colors, agent_col
+            )
 
     def render(self, highlight_mask, colors, agent_col, target_pos=None):
-        img = self.get_frame(self.highlight, self.tile_size, self.agent_pov, highlight_mask, colors, agent_col)
+        img = self.get_frame(
+            self.highlight,
+            self.tile_size,
+            self.agent_pov,
+            highlight_mask,
+            colors,
+            agent_col,
+        )
 
         if self.render_mode == "human":
             img = np.transpose(img, axes=(1, 0, 2))

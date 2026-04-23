@@ -35,6 +35,7 @@ def fill_coords(img, fn, color):
 
     return img
 
+
 class Grid:
     """
     Represent a grid and operations on it
@@ -169,7 +170,7 @@ class Grid:
         tile_size: int = TILE_PIXELS,
         subdivs: int = 3,
         color: tuple = (255, 255, 255),
-        agent_col = (255, 0, 0)
+        agent_col=(255, 0, 0),
     ) -> np.ndarray:
         """
         Render a tile and cache the result
@@ -189,7 +190,7 @@ class Grid:
         # Draw the grid lines (top and left edges)
         fill_coords(img, point_in_rect(0, 0.031, 0, 1), (100, 100, 100))
         fill_coords(img, point_in_rect(0, 1, 0, 0.031), (100, 100, 100))
-        
+
         # Highlight the cell if needed
         if highlight:
             color = (*color, 0.5) if len(color) < 4 else color
@@ -225,7 +226,7 @@ class Grid:
         agent_dir: int | None = None,
         highlight_mask: np.ndarray | None = None,
         colors: np.ndarray | None = None,
-        agent_col: tuple = (255, 0, 0)
+        agent_col: tuple = (255, 0, 0),
     ) -> np.ndarray:
         """
         Render this grid at a given scale
@@ -246,15 +247,17 @@ class Grid:
         for j in range(0, self.height):
             for i in range(0, self.width):
                 cell = self.get(i, j)
-                
+
                 agent_here = np.array_equal(agent_pos, (i, j))
                 tile_img = Grid.render_tile(
                     cell,
                     agent_dir=agent_dir if agent_here else None,
-                    highlight=highlight_mask[i, j] if highlight_mask is not None else None,
+                    highlight=(
+                        highlight_mask[i, j] if highlight_mask is not None else None
+                    ),
                     color=colors[i, j] if colors is not None else None,
                     tile_size=tile_size,
-                    agent_col=agent_col
+                    agent_col=agent_col,
                 )
 
                 ymin = j * tile_size

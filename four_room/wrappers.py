@@ -9,43 +9,49 @@ from minigrid.core.constants import DIR_TO_VEC
 
 from four_room.utils import obs_to_state
 
+
 class UndiscountedRewardWrapper(Wrapper):
     """
-        Transform the reward function into a simple:
-        - 1 for reaching the goal
-        - 0 otherwise
+    Transform the reward function into a simple:
+    - 1 for reaching the goal
+    - 0 otherwise
 
-        This is in contrast to the inherent discounting performed by minigrid. 
+    This is in contrast to the inherent discounting performed by minigrid.
     """
+
     def step(self, action):
         obs, reward, terminated, truncated, info = self.env.step(action)
-        
+
         if reward > 0:
             reward = 1
         return obs, reward, terminated, truncated, info
 
+
 class SparseActionsWrapper(Wrapper):
     """
-        Reduce the action space to only left, right and forward.
+    Reduce the action space to only left, right and forward.
     """
+
     def __init__(self, env):
         super().__init__(env)
-        
+
         new_action_space = spaces.Discrete(3)
         self.action_space = new_action_space
 
+
 class SparseFullyObsWrapper(FullyObsWrapper):
     """
-        Transform the observation space to have seperate channels for for every dimension of observation.
+    Transform the observation space to have seperate channels for for every dimension of observation.
 
-        The channels correspond to:
-        0 - agent location
-        1 - agent direction
-        2 - wall locations
-        3 - goal location
+    The channels correspond to:
+    0 - agent location
+    1 - agent direction
+    2 - wall locations
+    3 - goal location
 
-        The observation is also centered around the agent location.
+    The observation is also centered around the agent location.
     """
+
     def __init__(self, env):
         super().__init__(env)
 
@@ -68,20 +74,23 @@ class SparseFullyObsWrapper(FullyObsWrapper):
         """
         Produce a sparse numpy encoding of the grid
         """
-        env = self.unwrapped 
+        env = self.unwrapped
 
         # In the original code this is used to handle partial observations
         # here I just set it to all ones
         vis_mask = np.ones((env.grid.width, env.grid.height), dtype=bool)
 
-        observation = np.zeros((self.observation_space['image'].shape[0], env.grid.width, env.grid.height), dtype="uint8")
+        observation = np.zeros(
+            (self.observation_space["image"].shape[0], env.grid.width, env.grid.height),
+            dtype="uint8",
+        )
 
         # encode the agent location
         # since we will center around the agent location this channel is actually useless
         agent_location = np.array([env.agent_pos[0], env.agent_pos[1]])
         observation[0, agent_location[0], agent_location[1]] = 1
 
-        # agent direction 
+        # agent direction
         # put a 1 in the location where the agent would be if he moved forward with the current direction
         # (ignoring collisions)
         direction = agent_location + DIR_TO_VEC[env.agent_dir]
@@ -97,16 +106,16 @@ class SparseFullyObsWrapper(FullyObsWrapper):
                         if cell.type == "goal":
                             observation[3, i, j] = 1
 
-
         # # centre everything around the agent location
         # x_offset = env.grid.width // 2 - agent_location[0]
         # y_offset = env.grid.width // 2 - agent_location[1]
         # observation = np.roll(observation, (x_offset, y_offset), axis=(1,2))
 
         # transpose the x and y coordinates to be better aligned for plotting
-        observation = np.transpose(observation[:, :, :], axes=(0,2,1))
-        
+        observation = np.transpose(observation[:, :, :], axes=(0, 2, 1))
+
         return observation
+
 
 class TransposeFullyObsWrapper(FullyObsWrapper):
     def __init__(self, env):
@@ -115,7 +124,11 @@ class TransposeFullyObsWrapper(FullyObsWrapper):
         new_image_space = spaces.Box(
             low=0,
             high=255,
-            shape=(3, self.env.unwrapped.height, self.env.unwrapped.width,),  # number of cells
+            shape=(
+                3,
+                self.env.unwrapped.height,
+                self.env.unwrapped.width,
+            ),  # number of cells
             dtype="uint8",
         )
 
@@ -125,11 +138,11 @@ class TransposeFullyObsWrapper(FullyObsWrapper):
 
     def observation(self, obs):
         obs_dict = super().observation(obs)
-        full_grid = obs_dict['image']
-        full_grid = np.transpose(full_grid, axes=(2,1,0))
-        obs_dict['image'] = full_grid
+        full_grid = obs_dict["image"]
+        full_grid = np.transpose(full_grid, axes=(2, 1, 0))
+        obs_dict["image"] = full_grid
         return obs_dict
-    
+
 
 class FullStateWrapper(gym.ObservationWrapper):
     def __init__(self, env, vector_dim=13, size=19):
@@ -142,12 +155,12 @@ class FullStateWrapper(gym.ObservationWrapper):
     def observation(self, obs):
         state = obs_to_state(obs)
         doors = state[5:]
-        
+
         room_w = self.size // 2
         room_h = self.size // 2
-        
+
         final_state = [item for item in state[:5]]
-        
+
         for j in range(0, 2):
             for i in range(0, 2):
                 xL = i * room_w
@@ -166,34 +179,35 @@ class FullStateWrapper(gym.ObservationWrapper):
                     final_state.append(pos[1])
 
         final_state = np.array(final_state)
-        
+
         return final_state.astype(np.float32)
 
-def gym_wrapper(env, original_obs=True): 
+
+def gym_wrapper(env, original_obs=True):
     if original_obs:
         return ImgObsWrapper(
-                UndiscountedRewardWrapper(
-                    SparseActionsWrapper(
-                            TransposeFullyObsWrapper(env))))
+            UndiscountedRewardWrapper(
+                SparseActionsWrapper(TransposeFullyObsWrapper(env))
+            )
+        )
     else:
         return ImgObsWrapper(
-                UndiscountedRewardWrapper(
-                    SparseActionsWrapper(
-                            SparseFullyObsWrapper(env))))
-        
-        
-def gym_wrapper_state(env, use_cnn=False): 
+            UndiscountedRewardWrapper(SparseActionsWrapper(SparseFullyObsWrapper(env)))
+        )
+
+
+def gym_wrapper_state(env, use_cnn=False):
     if use_cnn:
         return ImgObsWrapper(
-                UndiscountedRewardWrapper(
-                    SparseActionsWrapper(
-                            TransposeFullyObsWrapper(env))))
+            UndiscountedRewardWrapper(
+                SparseActionsWrapper(TransposeFullyObsWrapper(env))
+            )
+        )
     else:
-        return FullStateWrapper(ImgObsWrapper(
+        return FullStateWrapper(
+            ImgObsWrapper(
                 UndiscountedRewardWrapper(
-                    SparseActionsWrapper(
-                            TransposeFullyObsWrapper(env)))))
-        
-
-
-    
+                    SparseActionsWrapper(TransposeFullyObsWrapper(env))
+                )
+            )
+        )

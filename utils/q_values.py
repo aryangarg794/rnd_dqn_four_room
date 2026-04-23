@@ -6,6 +6,7 @@ from four_room.constants import size, state_to_q
 from rnd_exploration.dataset import State
 from dqn.counter import MovingCountBasedUncertainty
 
+
 def next_state(x, y, d, a, doors):
     x, y, d = int(x), int(y), int(d)
     orig_x, orig_y, orig_d = x, y, d
@@ -13,7 +14,7 @@ def next_state(x, y, d, a, doors):
         d = (d - 1) % 4
     elif a == 1:
         d = (d + 1) % 4
-    elif a == 2: # move forward
+    elif a == 2:  # move forward
         if d == 0:
             x += 1
         elif d == 1:
@@ -22,7 +23,7 @@ def next_state(x, y, d, a, doors):
             x -= 1
         elif d == 3:
             y -= 1
-    
+
     room_w = size // 2
     room_h = size // 2
     doors_pos = []
@@ -54,19 +55,20 @@ def compute_mc(rewards: list, gamma: float = 0.99):
     G = 0
     for reward in reversed(rewards):
         G = reward + gamma * G
-        returns.insert(0, G)  
+        returns.insert(0, G)
     return returns
+
 
 def compute_q_value(obs, action, context, counter: MovingCountBasedUncertainty, gamma):
     state = obs_to_state(obs)
-    # we need the next state since we ask 'is it good to switch if im optimal from now on' 
+    # we need the next state since we ask 'is it good to switch if im optimal from now on'
     new_state = next_state(state[0], state[1], state[2], action, state[5:])
     state = [new_state[0], new_state[1], new_state[2]] + list(state[3:])
 
     paths = find_all_shortest_paths(state[:2], state[2], state[3:5], state[5:], size)
     path_index = np.random.randint(low=0, high=len(paths))
     path = paths[path_index]
-    
+
     rewards = [counter[context, *path_state] for path_state in path]
     return compute_mc(rewards, gamma)[0]
 
@@ -75,13 +77,15 @@ def optimal_q_action(obs, context, walls, counter: MovingCountBasedUncertainty, 
     state = obs_to_state(obs)
     actions = [0, 1, 2]
     q_values = []
-    
+
     for action in actions:
         obs_prime = next_state(*state[0:3], action, walls)
-        paths = find_all_shortest_paths(obs_prime[:2], obs_prime[2], state[3:5], state[5:], size)
+        paths = find_all_shortest_paths(
+            obs_prime[:2], obs_prime[2], state[3:5], state[5:], size
+        )
         path_index = np.random.randint(low=0, high=len(paths))
         path = paths[path_index]
         rewards = [counter[context, *path_state] for path_state in path]
         q_values.append(compute_mc(rewards, gamma)[0])
-        
+
     return np.array(q_values).argmax()
