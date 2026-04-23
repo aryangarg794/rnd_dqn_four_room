@@ -48,7 +48,7 @@ if __name__ == "__main__":
     parser.add_argument("-s", "--seed", type=int, default=0, help="seed")
     parser.add_argument("-b", "--batch", type=int, default=256, help="batch_size")
     parser.add_argument(
-        "-t", "--timesteps", type=int, default=4_000_000, help="batch_size"
+        "-t", "--timesteps", type=int, default=6_000_000, help="batch_size"
     )
     parser.add_argument(
         "-g", "--gamma", type=float, default=0.99, help="discount for the agent"

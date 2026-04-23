@@ -185,3 +185,5 @@ results/dqn_exps
 pyvenv.cfg
 lib64
 bin
+job_scripts
+share/
