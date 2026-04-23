@@ -65,7 +65,6 @@ nvidia-nccl-cu12==2.27.5
 nvidia-nvjitlink-cu12==12.8.93
 nvidia-nvshmem-cu12==3.4.5
 nvidia-nvtx-cu12==12.8.90
-opencv-python==4.13.0.92
 packaging==26.0
 pandas==3.0.1
 parso==0.8.6
