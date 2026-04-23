@@ -258,7 +258,7 @@ class DQNBaseAction(CustomQNetwork):
         self.layers.extend(
             [
                 L2Norm() if norm else nn.Identity(),
-                nn.Linear(2 * hidden_layers[0], hidden_layers[0]),
+                nn.Linear(hidden_layers[0], hidden_layers[0]),
                 act(),
             ]
         )
@@ -286,7 +286,7 @@ class DQNBaseAction(CustomQNetwork):
         act = self.act_layers(act)
         obs = self.obs_layers(obs)
 
-        inp = torch.cat([obs, act], dim=-1)
+        inp = obs * act
 
         return self.layers(inp)
 
@@ -342,7 +342,7 @@ class DQNBaseDual(CustomQNetwork):
         self.layers.extend(
             [
                 L2Norm() if norm else nn.Identity(),
-                nn.Linear(2 * hidden_layers[0], hidden_layers[0]),
+                nn.Linear(hidden_layers[0], hidden_layers[0]),
                 act(),
             ]
         )
@@ -356,6 +356,7 @@ class DQNBaseDual(CustomQNetwork):
                 nn.Linear(hidden_layers[-1], num_heads * action_space.n),
             ]
         )
+        self.num_heads = num_heads
 
         self.apply(_orthogonal_init if init == "orthogonal" else _kaiming_init)
 
@@ -366,7 +367,7 @@ class DQNBaseDual(CustomQNetwork):
         agent_info = self.obs_layers(agent_info)
         context = self.context_layers(context)
 
-        inp = torch.cat([agent_info, context], dim=-1)
+        inp = agent_info * context
 
         return self.layers(inp)
 
@@ -415,7 +416,7 @@ class DQNBaseDualAction(CustomQNetwork):
         self.layers.extend(
             [
                 L2Norm() if norm else nn.Identity(),
-                nn.Linear(3 * hidden_layers[0], hidden_layers[0]),
+                nn.Linear(hidden_layers[0], hidden_layers[0]),
                 act(),
             ]
         )
@@ -429,6 +430,7 @@ class DQNBaseDualAction(CustomQNetwork):
                 nn.Linear(hidden_layers[-1], num_heads),
             ]
         )
+        self.num_heads = num_heads
 
         self.apply(_orthogonal_init if init == "orthogonal" else _kaiming_init)
 
@@ -441,7 +443,7 @@ class DQNBaseDualAction(CustomQNetwork):
         agent_info = self.obs_layers(agent_info)
         context = self.context_layers(context)
 
-        inp = torch.cat([agent_info, act, context], dim=-1)
+        inp = agent_info * act * context
 
         return self.layers(inp)
 
