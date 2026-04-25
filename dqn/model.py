@@ -5,69 +5,13 @@ import gymnasium as gym
 
 from tqdm import tqdm
 from copy import deepcopy
+from torch.nn.functional import mse_loss
 
 from rnd_exploration.dataset import ReplayBuffer
 from rnd_exploration.utils import RunningAverage
-from four_room.arch import CNN
-
-
-class DQNModule(nn.Module):
-
-    def __init__(
-        self,
-        env: gym.Env,
-        use_cnn: bool = True,
-        cnn_features: int = 512,
-        hidden_layers: list = [256, 256],
-        residual: bool = True,
-        *args,
-        **kwargs
-    ) -> None:
-        super().__init__(*args, **kwargs)
-
-        self.num_actions = env.action_space.n
-
-        self.layers = nn.Sequential()
-
-        if use_cnn:
-            self.layers.extend(
-                [
-                    CNN(
-                        observation_space=env.observation_space,
-                        features_dim=cnn_features,
-                        residual=residual,
-                    ),
-                    nn.ReLU(),
-                ]
-            )
-        else:
-            self.layers.extend(
-                [nn.Linear(np.prod(env.observation_space.shape), cnn_features)]
-            )
-
-        self.layers.extend([nn.Linear(cnn_features, hidden_layers[0]), nn.ReLU()])
-
-        for layer1, layer2 in zip(hidden_layers[:-1], hidden_layers[1:]):
-            self.layers.extend([nn.Linear(layer1, layer2), nn.ReLU()])
-
-        self.layers.append(nn.Linear(hidden_layers[-1], self.num_actions))
-
-        self.apply(self.orthogonal_layer_init)
-
-    def _init(self, m):
-        if isinstance(m, (nn.Linear)):
-            nn.init.kaiming_normal_(m.weight, nonlinearity="relu")
-            if m.bias is not None:
-                nn.init.zeros_(m.bias)
-
-    def forward(self, x):
-        return self.layers(x)
-
-    def orthogonal_layer_init(layer, std=np.sqrt(2), bias_const=0.0):
-        if hasattr(layer, "weight"):
-            torch.nn.init.orthogonal_(layer.weight, std)
-            torch.nn.init.constant_(layer.bias, bias_const)
-        return layer
+from dqn.archs import DQNModule
+from utils.episode import LastEpisode
+from dqn.counter import MovingCountBasedUncertainty
 
 
 class DQN:
@@ -76,26 +20,36 @@ class DQN:
         self,
         env: gym.Env,
         val_env: gym.Env,
-        use_cnn: bool = True,
+        use_cnn=False,
+        use_dual=False,
+        use_action=False,
+        use_norm=True,
         capacity: int = int(1e5),
-        cnn_features: int = 512,
+        gamma: float = 0.99,
         start_epsilon: float = 0.99,
         max_decay: float = 0.1,
+        act: nn.Module = nn.ReLU,
+        return_ones: bool = False,
         decay_steps: float = 10000,
         lr: float = 5e-4,
         tau: float = 0.005,
-        hidden_layers: list = [256, 256],
+        hidden_layers: list = [512, 512, 512],
         device: str = "cuda",
-        residual: bool = True,
+        grad_norm: float = 10.0,
+        init_func: str = "kaiming",
         *args,
         **kwargs
     ):
         self.net = DQNModule(
-            env=env,
+            observation_space=env.observation_space,
+            action_space=env.action_space,
             use_cnn=use_cnn,
+            use_dual=use_dual,
+            use_norm=use_norm,
+            use_action=use_action,
+            init_func=init_func,
             hidden_layers=hidden_layers,
-            cnn_features=cnn_features,
-            residual=residual,
+            activation_fn=act,
         ).to(device)
 
         self.target_net = deepcopy(self.net).to(device)
@@ -106,17 +60,26 @@ class DQN:
         self.max_decay = max_decay
         self.decay_steps = decay_steps
         self.epsilon = start_epsilon
+        self.use_cnn = use_cnn
 
         self.buffer = ReplayBuffer(
             state_dim=env.observation_space.shape,
             capacity=capacity,
             num_actions=env.action_space.n,
             device=device,
+            use_state=not use_cnn,
         )
+
+        self.counter = MovingCountBasedUncertainty(
+            device=device, capacity=capacity, return_ones=return_ones
+        )
+
         self.optimizer = torch.optim.Adam(self.net.parameters(), lr=lr)
 
         self.tau = tau
         self.device = device
+        self.grad_norm = grad_norm
+        self.gamma = gamma
 
     def soft_update(self):
         with torch.no_grad():
@@ -126,6 +89,101 @@ class DQN:
                 target_param.data.copy_(
                     self.tau * param.data + (1 - self.tau) * target_param.data
                 )
+
+    def get_obs(self, obs: np.ndarray):
+        if not self.use_cnn:
+            np_state = np.array(list(obs))
+            return (
+                torch.from_numpy(np_state)
+                .view(1, len(np_state))
+                .to(self.device)
+                .float()
+            )
+        else:
+            return torch.from_numpy(obs).to(device=self.device).unsqueeze(dim=0).float()
+
+    def update_step(
+        self,
+        batch_size: int,
+        last_ep: LastEpisode = None,
+        last_expl: LastEpisode = None,
+    ):
+        batch_rewards, ind = self.counter.sample(batch_size=batch_size)
+        (
+            batch_obs,
+            batch_actions,
+            _,
+            batch_primes,
+            batch_next_actions,
+            batch_dones,
+        ) = self.buffer.sample_index(ind)
+
+        obs, primes, acts, n_acts, dones, rewards = (
+            [batch_obs],
+            [batch_primes],
+            [batch_actions],
+            [batch_next_actions],
+            [batch_dones],
+            [batch_rewards],
+        )
+
+        if last_ep:
+            (
+                last_obs,
+                last_action,
+                last_rewards,
+                last_obs_primes,
+                last_next_actions,
+                last_dones,
+            ) = last_ep.get(self.counter)
+
+            obs.append(last_obs)
+            primes.append(last_obs_primes)
+            acts.append(last_action)
+            n_acts.append(last_next_actions)
+            dones.append(last_dones)
+            rewards.append(last_rewards)
+
+        if last_expl:
+            (
+                last_obs_expl,
+                last_action_expl,
+                last_rewards_expl,
+                last_obs_primes_expl,
+                last_next_actions_expl,
+                last_dones_expl,
+            ) = last_ep.get(self.counter)
+
+            obs.append(last_obs_expl)
+            primes.append(last_obs_primes_expl)
+            acts.append(last_action_expl)
+            n_acts.append(last_next_actions_expl)
+            dones.append(last_dones_expl)
+            rewards.append(last_rewards_expl)
+
+        batch_obs = torch.cat(obs, dim=0)
+        batch_actions = torch.cat(acts, dim=0)
+        batch_primes = torch.cat(primes, dim=0)
+        batch_next_actions = torch.cat(n_acts, dim=0)
+        batch_dones = torch.cat(dones, dim=0)
+        batch_rewards = torch.cat(rewards, dim=0)
+
+        with torch.no_grad():
+            batch_rewards = batch_rewards.detach()
+            target_vals = self.target_net(batch_primes).gather(
+                dim=1, index=batch_next_actions
+            )
+            targets = batch_rewards + self.gamma * target_vals * (1 - batch_dones)
+
+        q_values = self.net(batch_obs).gather(dim=1, index=batch_actions)
+        loss = mse_loss(q_values, targets.detach())
+
+        self.optimizer.zero_grad()
+        loss.backward()
+        grad_norm = torch.nn.utils.clip_grad_norm_(
+            self.net.parameters(), self.grad_norm
+        )
+        self.optimizer.step()
 
     def eval(self, num_runs: int = 10, seed: int = 0):
         self.net.eval()

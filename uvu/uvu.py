@@ -122,7 +122,7 @@ class UVU:
         max_decay: float = 0.1,
         decay_steps: float = 10000,
         lr: float = 5e-4,
-        act: nn.Module = nn.LeakyReLU,
+        act: nn.Module = nn.ReLU,
         tau: float = 0.005,
         hidden_layers: list = [512, 512, 512],
         hidden_layers_g: list = [128],

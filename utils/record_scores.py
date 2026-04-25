@@ -150,10 +150,14 @@ def record_uncertainty_scores(counter, current_env: int, env_range: int = 5):
 
 @torch.no_grad()
 def record_dqn_scores(
-    agent: DQN, current_env: int, env_range: int = 5, device: str = "cuda"
+    agent: DQN,
+    current_env: int,
+    env_range: int = 5,
+    device: str = "cuda",
+    use_cnn: bool = False,
 ):
     env_ids = list(range(current_env - env_range, current_env + env_range + 1))
-    env = gym_wrapper(
+    env = gym_wrapper_state(
         gym.make(
             "MiniGrid-FourRooms-v1",
             agent_pos=train_config["agent positions"],
@@ -164,7 +168,7 @@ def record_dqn_scores(
             render_mode="rgb_array",
             disable_env_checker=True,
         ),
-        original_obs=True,
+        use_cnn=use_cnn,
     )
 
     agent.net.eval()
@@ -190,11 +194,11 @@ def record_dqn_scores(
                 4
             ):  # for each direction we want to store the state-q value pair
                 obs, _, _, _, _ = env.step(1)
-                state = obs_to_state(obs)
+                state = get_state(obs, use_cnn)
                 agent_dir = state[2]
 
-                obs_torch = torch.from_numpy(obs).to(device=device).unsqueeze(dim=0)
-                goal_action = state_to_q[State(obs)].argmax()
+                obs_torch = agent.get_obs(obs)
+                goal_action = state_to_q_np[env_id, *state[:3]].argmax()
                 dqn_val = agent(obs_torch).squeeze()[goal_action].item()
                 results[agent_dir, idx, *valid_state] = dqn_val
 

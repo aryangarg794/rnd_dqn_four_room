@@ -197,6 +197,7 @@ class ReplayBuffer:
     def __init__(
         self,
         state_dim: tuple,
+        use_state: bool,
         num_actions: int = 3,
         capacity: int = int(1e5),
         device: str = "cuda",
@@ -206,9 +207,11 @@ class ReplayBuffer:
         self.pointer = 0
         self.size = 0
 
-        self.states = torch.zeros(
-            (self.capacity, *state_dim), dtype=torch.float, device=self.device
+        state_space = (
+            (self.capacity, *state_dim) if not use_state else (self.capacity, 13)
         )
+
+        self.states = torch.zeros(state_space, dtype=torch.float, device=self.device)
         self.q_values = torch.zeros(
             (self.capacity, num_actions), dtype=torch.float, device=self.device
         )
@@ -219,7 +222,7 @@ class ReplayBuffer:
             (self.capacity, 1), dtype=torch.float, device=self.device
         )
         self.next_states = torch.zeros(
-            (self.capacity, *state_dim), dtype=torch.float, device=self.device
+            state_space, dtype=torch.float, device=self.device
         )
         self.next_actions = torch.zeros(
             (self.capacity, 1), dtype=torch.int64, device=self.device
@@ -320,17 +323,10 @@ class ReplayBufferBoot(ReplayBuffer):
         device="cuda",
         bootstap_prob=0.8,
     ):
-        super().__init__(state_dim, num_actions, capacity, device)
+        super().__init__(state_dim, use_state, num_actions, capacity, device)
 
         self.num_heads = num_heads
         self.bootstrap_prob = bootstap_prob
-        state_space = (
-            (self.capacity, *state_dim) if not use_state else (self.capacity, 13)
-        )
-        self.states = torch.zeros(state_space, dtype=torch.float, device=self.device)
-        self.next_states = torch.zeros(
-            state_space, dtype=torch.float, device=self.device
-        )
         self.masks = torch.zeros((capacity, num_heads), device=self.device)
 
     def sample(self, batch_size: int = 256):
