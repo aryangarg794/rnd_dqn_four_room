@@ -57,7 +57,8 @@ if __name__ == "__main__":
     parser.add_argument("--use_action", action="store_true", help="use cnn input")
     parser.add_argument("--use_dual", action="store_true", help="use cnn input")
     parser.add_argument("--use_norm", action="store_true", help="use norm input")
-    parser.add_argument("--concat", action="store_true", help="concat or not")
+    parser.add_argument("--concat_act", action="store_true", help="concat act or not")
+    parser.add_argument("--concat_dual", action="store_true", help="concat dual or not")
     parser.add_argument("-i", "--init", type=str, default="kaiming", help="init func")
 
     args = parser.parse_args()
@@ -98,17 +99,18 @@ if __name__ == "__main__":
     policy_kwargs["use_dual"] = args.use_dual
     policy_kwargs["use_norm"] = args.use_norm
     policy_kwargs["init_func"] = args.init
-    policy_kwargs["concat"] = args.concat
+    policy_kwargs["concat"] = {"action": args.concat_act, "dual": args.concat_dual}
 
     name_cnn = "_cnn" if args.use_cnn else "_mlp"
     name_norm = "_norm" if args.use_norm else ""
     name_act = "_act" if args.use_action else ""
     name_dual = "_dual" if args.use_dual else ""
-    name_cat = "_concat" if args.concat else "mult"
+    name_cat_act = "_concat_act" if args.concat_act else "mult_act"
+    name_cat_dual = "_concat_dual" if args.concat_act else "mult_dual"
     name_init = "_" + args.init
     time_name = human_format(args.timesteps)
 
-    group_name = f"{args.dir}{name_cnn}{name_act}{name_dual}{name_norm}{name_init}{name_cat}_{time_name}"
+    group_name = f"{args.dir}{name_cnn}{name_act}{name_dual}{name_norm}{name_init}{name_cat_act}{name_cat_dual}_{time_name}"
     save_file_name = f"{group_name}_seed_{args.seed}"
 
     eval_callback = EvalCallbackCustom(

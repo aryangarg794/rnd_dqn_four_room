@@ -194,7 +194,7 @@ class DQNBaseAction(CustomQNetwork):
         embed_dim: int = 256,
         hidden_layers: list = [256, 512],
         norm: bool = True,
-        concat: bool = False,
+        concat: dict = {"action": True, "dual": True},
         residual: bool = True,
         max_pool: bool = True,
         init: str = "kaiming",
@@ -215,7 +215,7 @@ class DQNBaseAction(CustomQNetwork):
         self.act_layers = nn.Sequential()
         self.layers = nn.Sequential()
         self.image_normaliser = 10.0
-        self.concat = concat
+        self.concat_act = concat["action"] 
 
         self.obs_layers.extend(
             [
@@ -261,7 +261,7 @@ class DQNBaseAction(CustomQNetwork):
             [
                 L2Norm() if norm else nn.Identity(),
                 nn.Linear(
-                    2 * hidden_layers[0] if concat else hidden_layers[0],
+                    2 * hidden_layers[0] if self.concat_act else hidden_layers[0],
                     hidden_layers[0],
                 ),
                 act(),
@@ -291,7 +291,7 @@ class DQNBaseAction(CustomQNetwork):
         act = self.act_layers(act)
         obs = self.obs_layers(obs)
 
-        if self.concat:
+        if self.concat_act:
             inp = torch.cat([obs, act], dim=-1)
         else:
             inp = obs * act
@@ -321,7 +321,7 @@ class DQNBaseDual(CustomQNetwork):
         action_space: gym.spaces.Discrete,
         hidden_layers: list = [256, 512],
         norm: bool = True,
-        concat: bool = False,
+        concat: dict = {"action": True, "dual": True},
         init: str = "kaiming",
         act: nn.Module = nn.ReLU,
         num_heads: int = 1,
@@ -339,7 +339,7 @@ class DQNBaseDual(CustomQNetwork):
         self.obs_layers = nn.Sequential()
         self.context_layers = nn.Sequential()
         self.layers = nn.Sequential()
-        self.concat = concat
+        self.concat_dual = concat["dual"]
 
         self.obs_layers.extend(
             [nn.Linear(3, 128), act(), nn.Linear(128, hidden_layers[0])]
@@ -353,7 +353,7 @@ class DQNBaseDual(CustomQNetwork):
             [
                 L2Norm() if norm else nn.Identity(),
                 nn.Linear(
-                    2 * hidden_layers[0] if concat else hidden_layers[0],
+                    2 * hidden_layers[0] if self.concat_dual else hidden_layers[0],
                     hidden_layers[0],
                 ),
                 act(),
@@ -380,7 +380,7 @@ class DQNBaseDual(CustomQNetwork):
         agent_info = self.obs_layers(agent_info)
         context = self.context_layers(context)
 
-        if self.concat:
+        if self.concat_dual:
             inp = torch.cat([agent_info, context], dim=-1)
         else:
             inp = agent_info * context
@@ -398,7 +398,7 @@ class DQNBaseDualAction(CustomQNetwork):
         hidden_layers: list = [256, 512],
         norm: bool = True,
         init: str = "kaiming",
-        concat: bool = False,
+        concat: dict = {"action": True, "dual": True},
         act: nn.Module = nn.ReLU,
         num_heads: int = 1,
     ) -> None:
@@ -416,7 +416,8 @@ class DQNBaseDualAction(CustomQNetwork):
         self.act_layers = nn.Sequential()
         self.context_layers = nn.Sequential()
         self.layers = nn.Sequential()
-        self.concat = concat
+        self.concat_act = concat["action"]
+        self.concat_dual = concat["dual"]
 
         self.obs_layers.extend(
             [nn.Linear(3, 128), act(), nn.Linear(128, hidden_layers[0])]
@@ -431,11 +432,18 @@ class DQNBaseDualAction(CustomQNetwork):
             [nn.Linear(embed_dim, 128), act(), nn.Linear(128, hidden_layers[0])]
         )
 
+        if self.concat_act and self.concat_dual:
+            inp_dim = 3 * hidden_layers[0]
+        elif self.concat_dual ^ self.concat_act:
+            inp_dim = 2 * hidden_layers[0]
+        else:
+            inp_dim = hidden_layers[0] 
+        
         self.layers.extend(
             [
                 L2Norm() if norm else nn.Identity(),
                 nn.Linear(
-                    3 * hidden_layers[0] if concat else hidden_layers[0],
+                    inp_dim,
                     hidden_layers[0],
                 ),
                 act(),
@@ -464,10 +472,14 @@ class DQNBaseDualAction(CustomQNetwork):
         agent_info = self.obs_layers(agent_info)
         context = self.context_layers(context)
 
-        if self.concat:
+        if self.concat_act and self.concat_dual:
             inp = torch.cat([agent_info, act, context], dim=-1)
+        elif self.concat_dual:
+            inp = torch.cat([agent_info * act, context], dim=-1)
+        elif self.concat_act:
+            inp = torch.cat([agent_info * context, act], dim=-1)
         else:
-            inp = agent_info * context
+            inp = agent_info * context * act
 
         return self.layers(inp)
 
@@ -498,7 +510,7 @@ class DQNBasePolicy(DQNPolicy):
         use_dual=False,
         use_action=False,
         use_norm=True,
-        concat=True,
+        concat={"action": True, "dual": True},
         init_func="kaiming",
         activation_fn=nn.ReLU,
         features_extractor_class=...,
