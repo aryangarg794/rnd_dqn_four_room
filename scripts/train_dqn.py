@@ -105,8 +105,8 @@ if __name__ == "__main__":
     name_norm = "_norm" if args.use_norm else ""
     name_act = "_act" if args.use_action else ""
     name_dual = "_dual" if args.use_dual else ""
-    name_cat_act = "_concat_act" if args.concat_act else "mult_act"
-    name_cat_dual = "_concat_dual" if args.concat_act else "mult_dual"
+    name_cat_act = "_concat_act" if args.concat_act else "_mult_act"
+    name_cat_dual = "_concat_dual" if args.concat_act else "_mult_dual"
     name_init = "_" + args.init
     time_name = human_format(args.timesteps)
 

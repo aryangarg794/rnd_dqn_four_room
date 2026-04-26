@@ -123,6 +123,7 @@ class UVU:
         decay_steps: float = 10000,
         lr: float = 5e-4,
         act: nn.Module = nn.ReLU,
+        concat: dict = {"action": True, "dual": True},
         tau: float = 0.005,
         hidden_layers: list = [512, 512, 512],
         hidden_layers_g: list = [128],
@@ -166,6 +167,7 @@ class UVU:
             action_space=env.action_space,
             use_cnn=use_cnn,
             use_dual=use_dual,
+            concat=concat, 
             use_norm=use_norm,
             use_action=use_action,
             init_func=init_func,
@@ -181,6 +183,7 @@ class UVU:
             action_space=env.action_space,
             use_cnn=use_cnn,
             use_norm=use_norm,
+            concat=concat,
             use_dual=use_dual,
             use_action=use_action,
             init_func=init_func,
@@ -330,19 +333,20 @@ class UVU:
             targets = batch_rewards + self.gamma * target_vals * (1 - batch_dones)
 
         q_values = self.net(batch_obs).gather(dim=-1, index=batch_actions)
-        loss_heads = (targets - q_values) ** 2 * batch_masks.unsqueeze(
+        loss_heads = ((targets - q_values) ** 2) * batch_masks.unsqueeze(
             dim=-1
         )  # (b, m, 1)
         loss_heads = loss_heads.squeeze(-1)
         # sum the heads * mask and then mean over the batch
-        loss = (loss_heads.sum(dim=0) / batch_masks.sum(dim=0)).sum()
-
+        loss = (loss_heads.sum(dim=0) / batch_masks.sum(dim=0)).mean()
         self.optimizer.zero_grad()
         loss.backward()
         grad_norm = torch.nn.utils.clip_grad_norm_(
             self.net.parameters(), self.grad_norm
         )
         self.optimizer.step()
+
+        return loss
 
     def save(self, path):
         torch.save(

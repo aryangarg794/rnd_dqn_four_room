@@ -191,7 +191,7 @@ class DQNBaseAction(CustomQNetwork):
         action_space: gym.spaces.Discrete,
         cnn_channels: int = 64,
         use_cnn: bool = True,
-        embed_dim: int = 256,
+        embed_dim: int = 32,
         hidden_layers: list = [256, 512],
         norm: bool = True,
         concat: dict = {"action": True, "dual": True},
@@ -394,7 +394,7 @@ class DQNBaseDualAction(CustomQNetwork):
         self,
         observation_space: gym.spaces.Box,
         action_space: gym.spaces.Discrete,
-        embed_dim: int = 256,
+        embed_dim: int = 32,
         hidden_layers: list = [256, 512],
         norm: bool = True,
         init: str = "kaiming",
@@ -596,6 +596,7 @@ class UVUBase(nn.Module):
         use_action=False,
         use_norm=True,
         init_func="kaiming",
+        concat={"action": True, "dual": True},
         hidden_layers=list([256, 512]),
         activation_fn=nn.ReLU,
         num_heads=10,
@@ -612,6 +613,7 @@ class UVUBase(nn.Module):
         self.init_func = init_func
         self.num_heads = num_heads
         self.num_actions = action_space.n
+        self.concat = concat
 
         if self.use_dual:
             if self.use_action:
@@ -623,6 +625,7 @@ class UVUBase(nn.Module):
                     act=activation_fn,
                     num_heads=num_heads,
                     hidden_layers=hidden_layers,
+                    concat=self.concat,
                 )
             else:
                 model = DQNBaseDual(
@@ -633,6 +636,7 @@ class UVUBase(nn.Module):
                     act=activation_fn,
                     num_heads=num_heads,
                     hidden_layers=hidden_layers,
+                    concat=self.concat,
                 )
         else:
             if self.use_action:
@@ -645,6 +649,7 @@ class UVUBase(nn.Module):
                     act=activation_fn,
                     num_heads=num_heads,
                     hidden_layers=hidden_layers,
+                    concat=self.concat,
                 )
             else:
                 model = DQNBase(
