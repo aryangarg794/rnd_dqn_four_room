@@ -494,7 +494,9 @@ class DQNBaseDualAction(CustomQNetwork):
         agent_info = self.obs_layers(agent_info)
         context = self.context_layers(context)
 
-        if self.concat_act and self.concat_dual:
+        if self.one_hot:
+            inp = torch.cat([agent_info * context, act], dim=-1)
+        elif self.concat_act and self.concat_dual:
             inp = torch.cat([agent_info, act, context], dim=-1)
         elif self.concat_dual:
             inp = torch.cat([agent_info * act, context], dim=-1)
