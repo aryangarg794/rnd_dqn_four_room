@@ -67,6 +67,7 @@ def train_uvu_count(
     warmupsteps: int = 3500,
     gradient_steps: int = 5,
     render: bool = False,
+    concat: dict = {"action": True, "dual": True},
     debug: bool = False,
     eps_mode: float = 0.05,
     eps_dqn: float = 0.05,
@@ -104,6 +105,7 @@ def train_uvu_count(
         use_dual=args.use_dual,
         use_norm=args.use_norm,
         init_func=args.init,
+        concat=concat, 
         num_heads=args.num_heads,
         gamma=gamma,
     )
@@ -414,6 +416,8 @@ if __name__ == "__main__":
     parser.add_argument("--use_action", action="store_true", help="use cnn input")
     parser.add_argument("--use_dual", action="store_true", help="use cnn input")
     parser.add_argument("--use_norm", action="store_true", help="use norm input")
+    parser.add_argument("--concat_act", action="store_true", help="concat act or not")
+    parser.add_argument("--concat_dual", action="store_true", help="concat dual or not")
     parser.add_argument(
         "-i", "--init", type=str, default="kaiming", help="init function"
     )
@@ -496,6 +500,7 @@ if __name__ == "__main__":
         render=args.render,
         debug=args.debug,
         window=args.window,
+        concat={"action": args.concat_act, "dual": args.concat_dual}, 
         eps_dqn=args.eps_dqn,
         eps_mode=args.eps_mode,
         gradient_steps=args.grad_steps,

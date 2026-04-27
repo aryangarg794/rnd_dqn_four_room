@@ -194,6 +194,7 @@ class DQNBaseAction(CustomQNetwork):
         embed_dim: int = 32,
         hidden_layers: list = [256, 512],
         norm: bool = True,
+        one_hot: bool = False, 
         concat: dict = {"action": True, "dual": True},
         residual: bool = True,
         max_pool: bool = True,
@@ -216,6 +217,7 @@ class DQNBaseAction(CustomQNetwork):
         self.layers = nn.Sequential()
         self.image_normaliser = 10.0
         self.concat_act = concat["action"] 
+        self.one_hot = one_hot
 
         self.obs_layers.extend(
             [
@@ -252,16 +254,24 @@ class DQNBaseAction(CustomQNetwork):
             ]
         )
 
-        self.act_embed = nn.Embedding(action_space.n, embed_dim)
-        self.act_layers.extend(
-            [nn.Linear(embed_dim, 128), act(), nn.Linear(128, hidden_layers[0])]
-        )
+        if self.one_hot:
+            inp_dim = hidden_layers[0] + action_space.n
+        elif self.concat_act:
+            inp_dim = 2 * hidden_layers[0]
+        else:
+            inp_dim = hidden_layers[0]
+
+        if not self.one_hot:
+            self.act_embed = nn.Embedding(action_space.n, embed_dim)
+            self.act_layers.extend(
+                [nn.Linear(embed_dim, 64), act(), nn.Linear(64, hidden_layers[0])]
+            )
 
         self.layers.extend(
             [
                 L2Norm() if norm else nn.Identity(),
                 nn.Linear(
-                    2 * hidden_layers[0] if self.concat_act else hidden_layers[0],
+                    inp_dim,
                     hidden_layers[0],
                 ),
                 act(),
@@ -287,11 +297,15 @@ class DQNBaseAction(CustomQNetwork):
         if self.use_cnn:
             obs = obs / self.image_normaliser
 
-        act = self.act_embed(act).squeeze(dim=1)
-        act = self.act_layers(act)
         obs = self.obs_layers(obs)
 
-        if self.concat_act:
+        if self.one_hot:
+            act = nn.functional.one_hot(act, 3).float().squeeze(1)
+        else:
+            act = self.act_embed(act).squeeze(dim=1)
+            act = self.act_layers(act)
+
+        if self.concat_act or self.one_hot:
             inp = torch.cat([obs, act], dim=-1)
         else:
             inp = obs * act
@@ -397,6 +411,7 @@ class DQNBaseDualAction(CustomQNetwork):
         embed_dim: int = 32,
         hidden_layers: list = [256, 512],
         norm: bool = True,
+        one_hot: bool = False, 
         init: str = "kaiming",
         concat: dict = {"action": True, "dual": True},
         act: nn.Module = nn.ReLU,
@@ -418,6 +433,7 @@ class DQNBaseDualAction(CustomQNetwork):
         self.layers = nn.Sequential()
         self.concat_act = concat["action"]
         self.concat_dual = concat["dual"]
+        self.one_hot = one_hot
 
         self.obs_layers.extend(
             [nn.Linear(3, 128), act(), nn.Linear(128, hidden_layers[0])]
@@ -432,7 +448,9 @@ class DQNBaseDualAction(CustomQNetwork):
             [nn.Linear(embed_dim, 128), act(), nn.Linear(128, hidden_layers[0])]
         )
 
-        if self.concat_act and self.concat_dual:
+        if self.one_hot:
+            inp_dim = hidden_layers[0] + action_space.n
+        elif self.concat_act and self.concat_dual:
             inp_dim = 3 * hidden_layers[0]
         elif self.concat_dual ^ self.concat_act:
             inp_dim = 2 * hidden_layers[0]
@@ -467,8 +485,12 @@ class DQNBaseDualAction(CustomQNetwork):
         agent_info = obs[:, :3]
         context = obs[:, 3:]
 
-        act = self.act_embed(act).squeeze(dim=1)
-        act = self.act_layers(act)
+        if self.one_hot:
+            act = nn.functional.one_hot(act, 3).float().squeeze(1)
+        else:
+            act = self.act_embed(act).squeeze(dim=1)
+            act = self.act_layers(act)
+        
         agent_info = self.obs_layers(agent_info)
         context = self.context_layers(context)
 
@@ -510,6 +532,7 @@ class DQNBasePolicy(DQNPolicy):
         use_dual=False,
         use_action=False,
         use_norm=True,
+        one_hot=False, 
         concat={"action": True, "dual": True},
         init_func="kaiming",
         activation_fn=nn.ReLU,
@@ -525,6 +548,7 @@ class DQNBasePolicy(DQNPolicy):
         self.use_norm = use_norm
         self.init_func = init_func
         self.concat = concat
+        self.one_hot = one_hot
         super().__init__(
             observation_space,
             action_space,
@@ -547,6 +571,7 @@ class DQNBasePolicy(DQNPolicy):
                     norm=self.use_norm,
                     init=self.init_func,
                     concat=self.concat,
+                    one_hot=self.one_hot,
                 )
             else:
                 model = DQNBaseDual(
@@ -565,6 +590,7 @@ class DQNBasePolicy(DQNPolicy):
                     norm=self.use_norm,
                     init=self.init_func,
                     concat=self.concat,
+                    one_hot=self.one_hot,
                 )
             else:
                 model = DQNBase(
@@ -595,6 +621,7 @@ class UVUBase(nn.Module):
         use_dual=False,
         use_action=False,
         use_norm=True,
+        one_hot=False,
         init_func="kaiming",
         concat={"action": True, "dual": True},
         hidden_layers=list([256, 512]),
@@ -614,6 +641,7 @@ class UVUBase(nn.Module):
         self.num_heads = num_heads
         self.num_actions = action_space.n
         self.concat = concat
+        self.one_hot = one_hot
 
         if self.use_dual:
             if self.use_action:
@@ -646,6 +674,7 @@ class UVUBase(nn.Module):
                     use_cnn=self.use_cnn,
                     norm=self.use_norm,
                     init=self.init_func,
+                    one_hot=self.one_hot, 
                     act=activation_fn,
                     num_heads=num_heads,
                     hidden_layers=hidden_layers,
@@ -684,6 +713,7 @@ class DQNModule(nn.Module):
         use_action=False,
         use_norm=True,
         init_func="kaiming",
+        concat={"action": True, "dual": True},
         hidden_layers=list([256, 512]),
         activation_fn=nn.ReLU,
         scale=1,
@@ -698,6 +728,7 @@ class DQNModule(nn.Module):
         self.use_norm = use_norm
         self.init_func = init_func
         self.num_actions = action_space.n
+        self.concat = concat 
 
         if self.use_dual:
             if self.use_action:
@@ -708,6 +739,7 @@ class DQNModule(nn.Module):
                     init=self.init_func,
                     act=activation_fn,
                     hidden_layers=hidden_layers,
+                    concat=self.concat
                 )
             else:
                 model = DQNBaseDual(
@@ -717,6 +749,7 @@ class DQNModule(nn.Module):
                     init=self.init_func,
                     act=activation_fn,
                     hidden_layers=hidden_layers,
+                    concat=self.concat
                 )
         else:
             if self.use_action:
@@ -728,6 +761,7 @@ class DQNModule(nn.Module):
                     init=self.init_func,
                     act=activation_fn,
                     hidden_layers=hidden_layers,
+                    concat=self.concat
                 )
             else:
                 model = DQNBase(

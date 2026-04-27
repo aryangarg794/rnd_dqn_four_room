@@ -57,6 +57,7 @@ if __name__ == "__main__":
     parser.add_argument("--use_action", action="store_true", help="use cnn input")
     parser.add_argument("--use_dual", action="store_true", help="use cnn input")
     parser.add_argument("--use_norm", action="store_true", help="use norm input")
+    parser.add_argument("--one_hot", action="store_true", help="one hot actions")
     parser.add_argument("--concat_act", action="store_true", help="concat act or not")
     parser.add_argument("--concat_dual", action="store_true", help="concat dual or not")
     parser.add_argument("-i", "--init", type=str, default="kaiming", help="init func")
@@ -99,6 +100,7 @@ if __name__ == "__main__":
     policy_kwargs["use_dual"] = args.use_dual
     policy_kwargs["use_norm"] = args.use_norm
     policy_kwargs["init_func"] = args.init
+    policy_kwargs["one_hot"] = args.one_hot
     policy_kwargs["concat"] = {"action": args.concat_act, "dual": args.concat_dual}
 
     name_cnn = "_cnn" if args.use_cnn else "_mlp"
