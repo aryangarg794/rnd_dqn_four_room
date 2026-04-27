@@ -107,12 +107,13 @@ if __name__ == "__main__":
     name_norm = "_norm" if args.use_norm else ""
     name_act = "_act" if args.use_action else ""
     name_dual = "_dual" if args.use_dual else ""
+    name_oh = "_oh" if args.one_hot else ""
     name_cat_act = "_concat_act" if args.concat_act else "_mult_act"
     name_cat_dual = "_concat_dual" if args.concat_act else "_mult_dual"
     name_init = "_" + args.init
     time_name = human_format(args.timesteps)
 
-    group_name = f"{args.dir}{name_cnn}{name_act}{name_dual}{name_norm}{name_init}{name_cat_act}{name_cat_dual}_{time_name}"
+    group_name = f"{args.dir}{name_cnn}{name_act}{name_dual}{name_norm}{name_init}{name_cat_act}{name_cat_dual}{name_oh}_{time_name}"
     save_file_name = f"{group_name}_seed_{args.seed}"
 
     eval_callback = EvalCallbackCustom(
