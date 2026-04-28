@@ -314,17 +314,18 @@ class DQNBaseAction(CustomQNetwork):
 
     def forward(self, obs):
         obs = obs.float()
+        batch_size = obs.size(0)
+        num_actions = self.action_space.n
         batched_input = obs.repeat(
-            self.action_space.n, *[1 for _ in range(len(self.observation_space.shape))]
+            num_actions, *[1 for _ in range(len(self.observation_space.shape))]
         )
         batched_act = (
-            torch.arange(0, self.action_space.n, device=obs.device)
-            .repeat_interleave(obs.size(0))
+            torch.arange(0, num_actions, device=obs.device)
+            .repeat_interleave(batch_size)
             .reshape(-1, 1)
         )
-        q_vals = self._forward_act(batched_input, batched_act)
-
-        return q_vals.view(obs.size(0), self.action_space.n * self.num_heads)
+        q_vals = self._forward_act(batched_input, batched_act).view(num_actions, batch_size, self.num_heads)
+        return q_vals.permute(1, 0, 2).reshape(batch_size, -1)
 
 
 class DQNBaseDual(CustomQNetwork):
@@ -509,17 +510,18 @@ class DQNBaseDualAction(CustomQNetwork):
 
     def forward(self, obs):
         obs = obs.float()
+        batch_size = obs.size(0)
+        num_actions = self.action_space.n
         batched_input = obs.repeat(
-            self.action_space.n, *[1 for _ in range(len(self.observation_space.shape))]
+            num_actions, *[1 for _ in range(len(self.observation_space.shape))]
         )
         batched_act = (
-            torch.arange(0, self.action_space.n, device=obs.device)
-            .repeat_interleave(obs.size(0))
+            torch.arange(0, num_actions, device=obs.device)
+            .repeat_interleave(batch_size)
             .reshape(-1, 1)
         )
-        q_vals = self._forward_act(batched_input, batched_act)
-
-        return q_vals.view(obs.size(0), self.action_space.n * self.num_heads)
+        q_vals = self._forward_act(batched_input, batched_act).view(num_actions, batch_size, self.num_heads)
+        return q_vals.permute(1, 0, 2).reshape(batch_size, -1)
 
 
 class DQNBasePolicy(DQNPolicy):
