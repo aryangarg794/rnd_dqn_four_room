@@ -57,10 +57,8 @@ if __name__ == "__main__":
     parser.add_argument("--use_action", action="store_true", help="use cnn input")
     parser.add_argument("--use_dual", action="store_true", help="use cnn input")
     parser.add_argument("--use_norm", action="store_true", help="use norm input")
-    parser.add_argument("--one_hot", action="store_true", help="one hot actions")
-    parser.add_argument("--concat_act", action="store_true", help="concat act or not")
-    parser.add_argument("--concat_dual", action="store_true", help="concat dual or not")
     parser.add_argument("-i", "--init", type=str, default="kaiming", help="init func")
+    parser.add_argument("-m", "--mod", type=str, default="concat", help="init func")
 
     args = parser.parse_args()
 
@@ -100,20 +98,17 @@ if __name__ == "__main__":
     policy_kwargs["use_dual"] = args.use_dual
     policy_kwargs["use_norm"] = args.use_norm
     policy_kwargs["init_func"] = args.init
-    policy_kwargs["one_hot"] = args.one_hot
-    policy_kwargs["concat"] = {"action": args.concat_act, "dual": args.concat_dual}
+    policy_kwargs["modulation"] = args.mod
 
     name_cnn = "_cnn" if args.use_cnn else "_mlp"
     name_norm = "_norm" if args.use_norm else ""
     name_act = "_act" if args.use_action else ""
     name_dual = "_dual" if args.use_dual else ""
-    name_oh = "_oh" if args.one_hot else ""
-    name_cat_act = "_cact" if args.concat_act else "_mact"
-    name_cat_dual = "_cdual" if args.concat_dual else "_mdual"
+    name_mod = f"_{args.mod}"
     name_init = "_" + args.init
     time_name = human_format(args.timesteps)
 
-    group_name = f"{args.dir}{name_cnn}{name_act}{name_dual}{name_norm}{name_init}{name_cat_act}{name_cat_dual}{name_oh}_{time_name}"
+    group_name = f"{args.dir}{name_cnn}{name_act}{name_dual}{name_norm}{name_init}{name_mod}_{time_name}"
     save_file_name = f"{group_name}_seed_{args.seed}"
 
     eval_callback = EvalCallbackCustom(
