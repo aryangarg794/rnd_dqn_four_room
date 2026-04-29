@@ -26,6 +26,7 @@ class DQN:
         use_norm=True,
         capacity: int = int(1e5),
         gamma: float = 0.99,
+        modulation: str = 'concat', 
         start_epsilon: float = 0.99,
         max_decay: float = 0.1,
         act: nn.Module = nn.ReLU,
@@ -50,6 +51,7 @@ class DQN:
             init_func=init_func,
             hidden_layers=hidden_layers,
             activation_fn=act,
+            modulation=modulation, 
         ).to(device)
 
         self.target_net = deepcopy(self.net).to(device)

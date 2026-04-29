@@ -120,19 +120,20 @@ class UVU:
         gamma: float = 0.99,
         start_epsilon: float = 0.99,
         max_decay: float = 0.1,
-        one_hot: bool = False, 
+        modulation: str = 'concat', 
         decay_steps: float = 10000,
         lr: float = 5e-4,
         act: nn.Module = nn.ReLU,
-        concat: dict = {"action": True, "dual": True},
         tau: float = 0.005,
         hidden_layers: list = [512, 512, 512],
         hidden_layers_g: list = [128],
         num_heads: int = 10,
         device: str = "cuda",
         grad_norm: float = 10.0,
-        scale_params: bool = False,
+        zero_params: bool = False,
+        uvu_sparsity: float = 0.5, 
         scale: float = 1.0,
+        residual: bool = True, 
         init_func: str = "kaiming",
         *args,
         **kwargs,
@@ -167,9 +168,8 @@ class UVU:
             observation_space=env.observation_space,
             action_space=env.action_space,
             use_cnn=use_cnn,
-            one_hot=one_hot,
+            modulation=modulation,
             use_dual=use_dual,
-            concat=concat, 
             use_norm=use_norm,
             use_action=use_action,
             init_func=init_func,
@@ -185,8 +185,7 @@ class UVU:
             action_space=env.action_space,
             use_cnn=use_cnn,
             use_norm=False,
-            concat=concat,
-            one_hot=one_hot,
+            modulation=modulation,
             use_dual=use_dual,
             use_action=use_action,
             init_func=init_func,
@@ -197,13 +196,14 @@ class UVU:
 
         self.num_heads = num_heads
 
-        if scale_params:
-            for param in self.g.parameters():
-                param.requires_grad = False
-                param.data = param.data * 10
-        else:
-            for param in self.g.parameters():
-                param.requires_grad = False
+        for param in self.g.parameters():
+            param.requires_grad = False
+
+        if zero_params:
+            for param in self.net.parameters():
+                mask = 1 - torch.bernoulli(torch.full_like(param.data, uvu_sparsity))
+                param.data = param.data * mask
+            
 
         self.env = env
         self.val_env = val_env

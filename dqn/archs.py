@@ -10,6 +10,7 @@ from stable_baselines3.common.torch_layers import BaseFeaturesExtractor
 
 from four_room.arch import ConvSequence
 
+coord_indices = [0, 1, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]
 
 @torch.no_grad()
 def _kaiming_init(m):
@@ -294,6 +295,10 @@ class DQNBaseAction(CustomQNetwork):
         obs = obs.float()
         if self.use_cnn:
             obs = obs / self.image_normaliser
+        else:
+            coord_indices = [0, 1, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]
+            obs[:, coord_indices] = obs[:, coord_indices] / 18.0
+            obs[:, 2] = obs[:, 2] / 3.0
 
         obs = self.obs_layers(obs)
 
@@ -395,6 +400,9 @@ class DQNBaseDual(CustomQNetwork):
 
     def forward(self, obs):
         obs = obs.float()
+        obs[:, coord_indices] = obs[:, coord_indices] / 18.0
+        obs[:, 2] = obs[:, 2] / 3.0
+
         agent_info = obs[:, :3]
         context = obs[:, 3:]
         agent_info = self.obs_layers(agent_info)
@@ -491,6 +499,9 @@ class DQNBaseDualAction(CustomQNetwork):
         self.apply(_orthogonal_init if init == "orthogonal" else _kaiming_init)
 
     def _forward_act(self, obs, act):
+        obs[:, coord_indices] = obs[:, coord_indices] / 18.0
+        obs[:, 2] = obs[:, 2] / 3.0
+        
         agent_info = obs[:, :3]
         context = obs[:, 3:]
 
@@ -638,6 +649,7 @@ class UVUBase(nn.Module):
         hidden_layers=list([256, 512]),
         activation_fn=nn.ReLU,
         num_heads=10,
+        residual=True, 
         scale=1,
         *args,
         **kwargs
@@ -684,11 +696,11 @@ class UVUBase(nn.Module):
                     use_cnn=self.use_cnn,
                     norm=self.use_norm,
                     init=self.init_func,
-                    one_hot=self.one_hot, 
                     act=activation_fn,
                     num_heads=num_heads,
                     hidden_layers=hidden_layers,
                     modulation=self.modulation,
+                    residual=residual, 
                 )
             else:
                 model = DQNBase(
@@ -699,6 +711,7 @@ class UVUBase(nn.Module):
                     init=self.init_func,
                     act=activation_fn,
                     num_heads=num_heads,
+                    residual=residual,
                     hidden_layers=hidden_layers,
                 )
 
@@ -723,7 +736,7 @@ class DQNModule(nn.Module):
         use_action=False,
         use_norm=True,
         init_func="kaiming",
-        concat={"action": True, "dual": True},
+        modulation="concat",
         hidden_layers=list([256, 512]),
         activation_fn=nn.ReLU,
         scale=1,
@@ -738,7 +751,7 @@ class DQNModule(nn.Module):
         self.use_norm = use_norm
         self.init_func = init_func
         self.num_actions = action_space.n
-        self.concat = concat 
+        self.modulation = modulation 
 
         if self.use_dual:
             if self.use_action:
@@ -749,7 +762,7 @@ class DQNModule(nn.Module):
                     init=self.init_func,
                     act=activation_fn,
                     hidden_layers=hidden_layers,
-                    concat=self.concat
+                    modulation=self.modulation
                 )
             else:
                 model = DQNBaseDual(
@@ -759,7 +772,7 @@ class DQNModule(nn.Module):
                     init=self.init_func,
                     act=activation_fn,
                     hidden_layers=hidden_layers,
-                    concat=self.concat
+                    modulation=self.modulation
                 )
         else:
             if self.use_action:
@@ -771,7 +784,7 @@ class DQNModule(nn.Module):
                     init=self.init_func,
                     act=activation_fn,
                     hidden_layers=hidden_layers,
-                    concat=self.concat
+                    modulation=self.modulation
                 )
             else:
                 model = DQNBase(
