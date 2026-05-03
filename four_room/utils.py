@@ -156,3 +156,10 @@ def reverse_doors(obs, size=19):
     doors[3] = int(obs[9] - (1 * room_w) - 1)
 
     return doors
+
+def get_state(obs, use_cnn):
+    if use_cnn:
+        return obs_to_state(obs)
+    else:
+        first = [int(item) for item in obs[:5]]
+        return tuple(first + list(reverse_doors(obs)))

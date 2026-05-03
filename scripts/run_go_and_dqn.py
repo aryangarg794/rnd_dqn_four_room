@@ -14,14 +14,9 @@ from tqdm import tqdm
 from collections import deque
 
 from four_room.env import FourRoomsEnv
-from four_room.utils import obs_to_state
-from four_room.shortest_path import (
-    find_all_action_values,
-    find_all_shortest_paths,
-    compute_actions,
-)
-from four_room.wrappers import gym_wrapper
-from four_room.constants import state_to_q
+from four_room.utils import get_state
+from four_room.wrappers import gym_wrapper_state
+from four_room.constants import state_to_q_np
 from rnd_exploration.utils import RunningAverage
 from four_room.constants import train_config, val_config, test_config, size
 from rnd_exploration.dataset import State, Transition
@@ -44,8 +39,13 @@ class Args:
     use_cnn: bool = True
     capacity: int = int(1e5)
     tau: float = 0.005
-    use_actions: bool = False
     device: str = "cuda"
+    use_cnn: bool = False
+    use_dual: bool = False
+    use_norm: bool = False
+    use_action: bool = False
+    mod: str = "one_hot"
+    init: str = "kaiming"
 
 
 def train_dqn_count(
@@ -94,8 +94,12 @@ def train_dqn_count(
         lr=args.lr_agent,
         device=args.device,
         use_cnn=args.use_cnn,
-        cnn_features=1024,
-        hidden_layers=[1024, 2048, 1024],
+        use_action=args.use_action,
+        use_dual=args.use_dual,
+        use_norm=args.use_norm,
+        init_func=args.init,
+        modulation=args.mod, 
+        hidden_layers=[512, 512, 512],
         residual=True,
     )
 
@@ -109,7 +113,7 @@ def train_dqn_count(
 
     obs, _ = env.reset()
     record = False
-    state = obs_to_state(obs)
+    state = get_state(obs, args.use_cnn)
     goal_pos = state[3:5]
     target_pos = state[3:5]  # first phase is warmup
     aux_pos = None
@@ -174,7 +178,7 @@ def train_dqn_count(
     for step in (pbar := tqdm(range(1, num_timesteps + 1), disable=debug)):
 
         obs_torch = torch.from_numpy(obs).to(device=args.device).unsqueeze(dim=0)
-        state = obs_to_state(obs)
+        state = get_state(obs, args.use_cnn)
         contexts.append(current_context)
         agent_pos = env.get_wrapper_attr("agent_pos")
 
@@ -183,17 +187,17 @@ def train_dqn_count(
         elif np.random.random() < eps_dqn:
             action = np.random.randint(low=0, high=3)
         else:
-            q = state_to_q[State(state=obs)]
+            q = state_to_q_np[current_context, state[0], state[1], state[2]]
             action = q.argmax() if isinstance(q, np.ndarray) else np.array(q).argmax()
 
         with torch.no_grad():
-            goal_action = state_to_q[State(obs)].argmax()
+            goal_action = state_to_q_np[current_context, state[0], state[1], state[2]].argmax()
             dqn_val = agent(obs_torch).squeeze()[goal_action].item()
             obj_tuple = tuple([int(item) for item in state])
             obj_tuple = (*obj_tuple, current_context)
             obj_moving_tuple = (current_context, *agent_pos, state[2])
             uncertainty = counter_moving[*obj_moving_tuple]
-            q = state_to_q[State(state=obs)]
+            q = state_to_q_np[current_context, state[0], state[1], state[2]]
 
         norm = (dqn_val - rms_dqn.avg) / rms_dqn.std
 
@@ -223,7 +227,14 @@ def train_dqn_count(
         if step < warmupsteps or record:
             assert np.array_equal(target_pos, goal_pos)
             # print(f'Timestep: {step} | Context: {current_context} | State: {agent_pos} | Dir: {state[2]} | Switch Count: {heatmap_swap[current_context, *agent_pos]} | Uncert: {uncertainty:.4f} | Count: {counter_moving.counts[*obj_moving_tuple]}')
-            q_next = state_to_q[State(state=obs_prime)] if not done else placeholder
+            state_prime = get_state(obs_prime, args.use_cnn)
+            q_next = (
+                state_to_q_np[
+                    current_context, state_prime[0], state_prime[1], state_prime[2]
+                ]
+                if not done
+                else placeholder
+            )
             next_action = q_next.argmax()
             agent.buffer.update(
                 obs, action, reward, obs_prime, next_action, int(done), q_value=q
@@ -247,7 +258,14 @@ def train_dqn_count(
             )
             items_added += 1
         else:
-            q_next = state_to_q[State(state=obs_prime)] if not done else placeholder
+            state_prime = get_state(obs_prime, args.use_cnn)
+            q_next = (
+                state_to_q_np[
+                    current_context, state_prime[0], state_prime[1], state_prime[2]
+                ]
+                if not done
+                else placeholder
+            )
             next_action = q_next.argmax()
             last_expl_ep.update(
                 obs, action, obs_prime, next_action, int(done), obj_moving_tuple
@@ -338,7 +356,7 @@ def train_dqn_count(
 
             obs, _ = env.reset()
             done = False
-            state = obs_to_state(obs)
+            state = get_state(obs, args.use_cnn)
             goal_pos = state[3:5]
 
             mode = False
@@ -394,8 +412,13 @@ def train_dqn_count(
         uniqueness.append(agent.buffer.ratio_unique_trans)
         value = (dqn_val - rms_dqn.avg) / rms_dqn.std
         # pbar.set_description(f"Training RND DQN | Uniqueness: {agent.buffer.ratio_unique_trans:.4f} | Last Regression Exp: {(scores[-1] if len(scores) > 0 else 0):.4f} | Total Items added: {items_added} | Current Context: {current_context} | RND Val: {dqn_val:.4f} | Avg: {rms_dqn.avg:.4f} | STD: {rms_dqn.std:.4f} | Switches: {switches} | Value: {value:.4f}")
-        pbar.set_description(
-            f"Training RND Count | Uniqueness: {agent.buffer.ratio_unique_trans:.4f} | Items added: {items_added} | Context: {current_context}"
+        reg_exp = scores[-1] if len(scores) > 0 else 0
+        pbar.set_description(f"Items added: {items_added} | Context: {current_context}")
+        pbar.set_postfix(
+            unq=agent.buffer.ratio_unique_trans,
+            norm_avg=rms_norms.avg,
+            reg=reg_exp,
+            switches=switches,
         )
 
     return {
@@ -438,7 +461,7 @@ if __name__ == "__main__":
         "-fr", "--freq", type=int, default=int(1e5), help="freq of regression"
     )
     parser.add_argument(
-        "--window", type=int, default=3500, help="window size of rms_dqn"
+        "--window", type=int, default=2500, help="window size of rms_dqn"
     )
     parser.add_argument("-tau", "--tau", type=float, default=0.1, help="tau")
     parser.add_argument("--debug", action="store_true", help="debug mode")
@@ -449,10 +472,18 @@ if __name__ == "__main__":
         "--last_ep", type=int, default=10, help="window size of last_ep"
     )
     parser.add_argument("--grad_steps", type=int, default=10, help="num of grad steps")
+    parser.add_argument("--use_cnn", action="store_true", help="use cnn input")
+    parser.add_argument("--use_action", action="store_true", help="use cnn input")
+    parser.add_argument("--use_dual", action="store_true", help="use cnn input")
+    parser.add_argument("--use_norm", action="store_true", help="use norm input")
+    parser.add_argument("-m", "--mod", type=str, default="concat", help="init func")
+    parser.add_argument(
+        "-i", "--init", type=str, default="kaiming", help="init function"
+    )
 
     args = parser.parse_args()
 
-    env = gym_wrapper(
+    env = gym_wrapper_state(
         gym.make(
             "MiniGrid-FourRooms-v1",
             agent_pos=train_config["agent positions"],
@@ -463,10 +494,10 @@ if __name__ == "__main__":
             render_mode="rgb_array",
             disable_env_checker=True,
         ),
-        original_obs=True,
+        use_cnn=args.use_cnn,
     )
 
-    val_env = gym_wrapper(
+    val_env = gym_wrapper_state(
         gym.make(
             "MiniGrid-FourRooms-v1",
             agent_pos=val_config["agent positions"],
@@ -475,10 +506,10 @@ if __name__ == "__main__":
             agent_dir=val_config["agent directions"],
             size=size,
         ),
-        original_obs=True,
+        use_cnn=args.use_cnn,
     )
 
-    test_env = gym_wrapper(
+    test_env = gym_wrapper_state(
         gym.make(
             "MiniGrid-FourRooms-v1",
             agent_pos=test_config["agent positions"],
@@ -487,7 +518,7 @@ if __name__ == "__main__":
             agent_dir=test_config["agent directions"],
             size=size,
         ),
-        original_obs=True,
+        use_cnn=args.use_cnn,
     )
 
     aux_args = Args(
@@ -499,6 +530,12 @@ if __name__ == "__main__":
         device=args.device,
         capacity=args.replaysize,
         tau=args.tau,
+        use_cnn=args.use_cnn,
+        use_action=args.use_action,
+        use_dual=args.use_dual,
+        use_norm=args.use_norm,
+        init=args.init,
+        mod=args.mod
     )
 
     results, agent = train_dqn_count(

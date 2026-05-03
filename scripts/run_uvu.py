@@ -15,7 +15,7 @@ from collections import deque
 
 from dqn.counter import MovingCountBasedUncertainty, CountBasedUncertainty
 from four_room.env import FourRoomsEnv
-from four_room.utils import obs_to_state, reverse_doors
+from four_room.utils import get_state
 from four_room.wrappers import gym_wrapper_state
 from four_room.constants import state_to_q_np
 from rnd_exploration.utils import RunningAverage
@@ -39,21 +39,14 @@ class Args:
     use_dual: bool = False
     use_norm: bool = False
     use_action: bool = False
+    mod: str = "one_hot"
     capacity: int = int(1e5)
     init: str = "kaiming"
     tau: float = 0.005
     device: str = "cuda"
-    gamma: float = 0.9
+    gamma: float = 0.99
     grad_norm: float = 10.0
     num_heads: int = 512
-
-
-def get_state(obs, use_cnn):
-    if use_cnn:
-        return obs_to_state(obs)
-    else:
-        first = [int(item) for item in obs[:5]]
-        return tuple(first + list(reverse_doors(obs)))
 
 
 def train_uvu_count(
@@ -99,13 +92,13 @@ def train_uvu_count(
         lr=args.lr_agent,
         device=args.device,
         hidden_layers=[512, 512, 512],
-        hidden_layers_g=[512, 512, 512],
+        hidden_layers_g=[512, 512],
         use_cnn=args.use_cnn,
         use_action=args.use_action,
         use_dual=args.use_dual,
         use_norm=args.use_norm,
         init_func=args.init,
-        concat=concat, 
+        modulation=args.mod, 
         num_heads=args.num_heads,
         gamma=gamma,
     )
@@ -404,10 +397,10 @@ if __name__ == "__main__":
         "-fr", "--freq", type=int, default=int(1e6), help="freq of regression"
     )
     parser.add_argument(
-        "--window", type=int, default=3500, help="window size of rms_dqn"
+        "--window", type=int, default=2500, help="window size of rms_dqn"
     )
     parser.add_argument("-tau", "--tau", type=float, default=0.1, help="tau")
-    parser.add_argument("-g", "--gamma", type=float, default=0.95, help="discount")
+    parser.add_argument("-g", "--gamma", type=float, default=0.99, help="discount")
     parser.add_argument("--debug", action="store_true", help="debug mode")
     parser.add_argument("-ed", "--eps_dqn", type=float, default=0.05, help="eps dqn")
     parser.add_argument("-em", "--eps_mode", type=float, default=0.00, help="eps dqn")
@@ -416,8 +409,7 @@ if __name__ == "__main__":
     parser.add_argument("--use_action", action="store_true", help="use cnn input")
     parser.add_argument("--use_dual", action="store_true", help="use cnn input")
     parser.add_argument("--use_norm", action="store_true", help="use norm input")
-    parser.add_argument("--concat_act", action="store_true", help="concat act or not")
-    parser.add_argument("--concat_dual", action="store_true", help="concat dual or not")
+    parser.add_argument("-m", "--mod", type=str, default="concat", help="init func")
     parser.add_argument(
         "-i", "--init", type=str, default="kaiming", help="init function"
     )
@@ -468,6 +460,7 @@ if __name__ == "__main__":
     name_dual = "_dual" if args.use_dual else ""
     name_init = "_" + args.init
     name_alpha = "_alpha" + str(args.alpha).replace(".", "")
+    name_mod = f"_{args.mod}"
 
     group_name = (
         f"{args.dir}{name_cnn}{name_act}{name_dual}{name_norm}{name_init}_{name_alpha}"
@@ -488,6 +481,7 @@ if __name__ == "__main__":
         use_dual=args.use_dual,
         use_norm=args.use_norm,
         init=args.init,
+        mod=args.mod
     )
 
     results, agent = train_uvu_count(
@@ -500,7 +494,6 @@ if __name__ == "__main__":
         render=args.render,
         debug=args.debug,
         window=args.window,
-        concat={"action": args.concat_act, "dual": args.concat_dual}, 
         eps_dqn=args.eps_dqn,
         eps_mode=args.eps_mode,
         gradient_steps=args.grad_steps,

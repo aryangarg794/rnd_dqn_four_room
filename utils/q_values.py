@@ -89,3 +89,4 @@ def optimal_q_action(obs, context, walls, counter: MovingCountBasedUncertainty, 
         q_values.append(compute_mc(rewards, gamma)[0])
 
     return np.array(q_values).argmax()
+
