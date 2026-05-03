@@ -399,11 +399,11 @@ if __name__ == "__main__":
     parser.add_argument(
         "--window", type=int, default=2500, help="window size of rms_dqn"
     )
-    parser.add_argument("-tau", "--tau", type=float, default=0.1, help="tau")
+    parser.add_argument("-tau", "--tau", type=float, default=0.5, help="tau")
     parser.add_argument("-g", "--gamma", type=float, default=0.99, help="discount")
     parser.add_argument("--debug", action="store_true", help="debug mode")
     parser.add_argument("-ed", "--eps_dqn", type=float, default=0.05, help="eps dqn")
-    parser.add_argument("-em", "--eps_mode", type=float, default=0.00, help="eps dqn")
+    parser.add_argument("-em", "--eps_mode", type=float, default=0.05, help="eps dqn")
     parser.add_argument("--grad_steps", type=int, default=1, help="num of grad steps")
     parser.add_argument("--use_cnn", action="store_true", help="use cnn input")
     parser.add_argument("--use_action", action="store_true", help="use cnn input")

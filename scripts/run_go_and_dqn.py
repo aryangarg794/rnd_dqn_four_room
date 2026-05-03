@@ -19,7 +19,6 @@ from four_room.wrappers import gym_wrapper_state
 from four_room.constants import state_to_q_np
 from rnd_exploration.utils import RunningAverage
 from four_room.constants import train_config, val_config, test_config, size
-from rnd_exploration.dataset import State, Transition
 from dqn_experiments.regression_exp_utils import run_experiment
 from dqn.model import DQN
 from dqn.counter import CountBasedUncertainty, MovingCountBasedUncertainty
@@ -521,9 +520,22 @@ if __name__ == "__main__":
         use_cnn=args.use_cnn,
     )
 
+    name_cnn = "_cnn" if args.use_cnn else "_mlp"
+    name_norm = "_norm" if args.use_norm else ""
+    name_act = "_act" if args.use_action else ""
+    name_dual = "_dual" if args.use_dual else ""
+    name_init = "_" + args.init
+    name_alpha = "_alpha" + str(args.alpha).replace(".", "")
+    name_mod = f"_{args.mod}"
+
+    group_name = (
+        f"{args.dir}{name_cnn}{name_act}{name_dual}{name_norm}{name_init}_{name_alpha}"
+    )
+    save_file_name = f"{group_name}_seed_{args.seed}"
+
     aux_args = Args(
         env=env,
-        dir=args.dir,
+        dir=save_file_name,
         seed=args.seed,
         val_env=val_env,
         lr_agent=args.lr_agent,
@@ -557,18 +569,18 @@ if __name__ == "__main__":
 
     torch.save(
         agent.net.state_dict(),
-        f"results/models/{args.dir}_seed_{args.seed}_{args.timesteps}.pt",
+        f"results/models/{save_file_name}_{args.timesteps}.pt",
     )
 
     with open(
-        f"results/dqn_exps/{args.dir}_seed_{args.seed}_{args.timesteps}.pl", "wb"
+        f"results/dqn_exps/{save_file_name}_{args.timesteps}.pl", "wb"
     ) as file:
         dill.dump(results, file)
 
     if args.render:
         imgs = list(results["images"])
         imageio.mimsave(
-            f"renders/rendered_{args.dir}_seed_{args.seed}.gif",
+            f"renders/rendered_{save_file_name}.gif",
             [np.array(img) for i, img in enumerate(imgs[-500:]) if i % 1 == 0],
             duration=150,
         )
