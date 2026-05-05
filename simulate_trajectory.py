@@ -80,17 +80,18 @@ def simulate_trajectory(
             env,
             deepcopy(env),
             hidden_layers=[512, 512, 512],
-            hidden_layers_g=[512, 512, 512],
+            hidden_layers_g=[512, 512],
             num_heads=512,
             use_cnn=use_cnn,
             use_dual=True,
             use_norm=True,
             use_action=True,
+            modulation='one_hot',
             device=device,
         )
         agent.load(file_name)
         agent.net.eval()
-        dqn_scores, _, dqn_scores_dirs = record_uvu_scores(agent, random_context, 0)
+        dqn_scores, _, dqn_scores_dirs = record_uvu_scores(agent, random_context, 0, use_cnn=use_cnn)
         dqn_scores = dqn_scores / scale
         dqn_scores_dirs = dqn_scores_dirs / scale
         uvu = True
@@ -114,7 +115,7 @@ def simulate_trajectory(
     k = np.random.randint(low=0, high=max_k)
     aux_pos = env.get_wrapper_attr("valid_pos")[k]
 
-    state = get_state(obs, False)
+    state = get_state(obs, use_cnn)
     goal_pos = state[3:5]
     paths = find_all_shortest_paths(state[:2], state[2], aux_pos, state[5:], size)
     path_index = np.random.randint(low=0, high=len(paths))
@@ -340,7 +341,7 @@ if __name__ == "__main__":
         "-f", "--dir", type=str, default="dqn_count_test", help="save name"
     )
     parser.add_argument("-un", "--unnorm", action="store_false", help="optimal mode")
-    parser.add_argument("--use_cnn", action="store_true", help="optimal mode")
+    parser.add_argument("--use_cnn", action="store_true", help="use cnn")
     parser.add_argument("-s", "--scale", type=int, default=1, help="scale")
 
     args = parser.parse_args()
