@@ -60,7 +60,6 @@ def train_uvu_count(
     warmupsteps: int = 3500,
     gradient_steps: int = 5,
     render: bool = False,
-    concat: dict = {"action": True, "dual": True},
     debug: bool = False,
     eps_mode: float = 0.05,
     eps_dqn: float = 0.05,
@@ -460,10 +459,11 @@ if __name__ == "__main__":
     name_dual = "_dual" if args.use_dual else ""
     name_init = "_" + args.init
     name_alpha = "_alpha" + str(args.alpha).replace(".", "")
+    name_grad = "_grad" + str(args.grad_steps)
     name_mod = f"_{args.mod}"
 
     group_name = (
-        f"{args.dir}{name_cnn}{name_act}{name_dual}{name_norm}{name_init}_{name_alpha}"
+        f"{args.dir}{name_cnn}{name_act}{name_dual}{name_norm}{name_init}{name_alpha}{name_mod}{name_grad}"
     )
     save_file_name = f"{group_name}_seed_{args.seed}"
 

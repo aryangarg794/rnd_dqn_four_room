@@ -442,10 +442,10 @@ if __name__ == "__main__":
 
     parser = argparse.ArgumentParser()
     parser.add_argument(
-        "-t", "--timesteps", type=int, default=int(5e5), help="timesteps"
+        "-t", "--timesteps", type=int, default=int(3e5), help="timesteps"
     )
-    parser.add_argument("-f", "--dir", type=str, default="comb_test", help="save name")
-    parser.add_argument("-a", "--alpha", type=float, default=1.5, help="alpha")
+    parser.add_argument("-f", "--dir", type=str, default="dqn", help="save name")
+    parser.add_argument("-a", "--alpha", type=float, default=0.5, help="alpha")
     parser.add_argument(
         "-ag", "--lr_agent", type=float, default=1e-4, help="lr for dqn agent"
     )
@@ -526,10 +526,11 @@ if __name__ == "__main__":
     name_dual = "_dual" if args.use_dual else ""
     name_init = "_" + args.init
     name_alpha = "_alpha" + str(args.alpha).replace(".", "")
+    name_grad = "_grad" + str(args.grad_steps)
     name_mod = f"_{args.mod}"
 
     group_name = (
-        f"{args.dir}{name_cnn}{name_act}{name_dual}{name_norm}{name_init}_{name_alpha}"
+        f"{args.dir}{name_cnn}{name_act}{name_dual}{name_norm}{name_init}{name_alpha}{name_mod}{name_grad}"
     )
     save_file_name = f"{group_name}_seed_{args.seed}"
 
