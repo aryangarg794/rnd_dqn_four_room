@@ -324,12 +324,12 @@ def train_uvu_count(
 
         if at_end:
             if step == num_timesteps:
-                lc, test_score = run_experiment(agent.buffer, use_cnn=args.use_cnn, device=args.device)
+                lc, test_score = run_experiment(agent.buffer, use_cnn=args.use_cnn, device=args.device, disable=True)
                 learning_curves.append(lc)
                 scores.append(test_score)
         else:
             if step % regression_freq == 0 and agent.buffer.size >= agent.buffer.capacity:
-                lc, test_score = run_experiment(agent.buffer, use_cnn=args.use_cnn, device=args.device)
+                lc, test_score = run_experiment(agent.buffer, use_cnn=args.use_cnn, device=args.device, disable=True)
                 learning_curves.append(lc)
                 scores.append(test_score)
 
@@ -469,9 +469,13 @@ if __name__ == "__main__":
     name_alpha = "_alpha" + str(args.alpha).replace(".", "")
     name_grad = "_grad" + str(args.grad_steps)
     name_mod = f"_{args.mod}"
+    name_lr = "_lr" + str(args.lr_agent).replace(".", "")
+    name_bs = "_bs" + str(args.batch_size)
+    name_tau = "_tau" + str(args.tau).replace(".", "")
+    name_eps = "_eps" + str(args.eps_dqn).replace(".", "")
 
     group_name = (
-        f"{args.dir}{name_cnn}{name_act}{name_dual}{name_norm}{name_init}{name_alpha}{name_mod}{name_grad}"
+        f"{args.dir}{name_alpha}{name_lr}{name_bs}{name_tau}{name_eps}"
     )
     save_file_name = f"{group_name}_seed_{args.seed}"
 

@@ -53,7 +53,7 @@ class RegressionModel(nn.Module):
         # final layer for predicting values
         self.layers.append(nn.Linear(hidden_layers[-1], self.env.action_space.n))
 
-        self.loss = nn.MSELoss()
+        self.loss = nn.HuberLoss()
         self.optimizer = torch.optim.Adam(self.parameters(), lr=lr)
         self.device = device
 

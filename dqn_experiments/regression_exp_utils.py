@@ -22,6 +22,7 @@ def run_experiment(
     val_freq: int = int(1e4),
     batch_size: int = 128,
     device: str = "cuda",
+    disable: bool = False, 
     use_cnn: bool = False, 
     print_freq: int = 5000,
 ):
@@ -61,7 +62,7 @@ def run_experiment(
     n_samples = buffer.capacity
 
     start_time = time.time()
-    for step in (pbar := tqdm(range(1, timesteps + 1), disable=True)):
+    for step in (pbar := tqdm(range(1, timesteps + 1), disable=disable)):
         batch_idx = torch.randint(0, n_samples, (batch_size,), device=device)
         batch_x = X_train[batch_idx]
         batch_y = y_train[batch_idx]
