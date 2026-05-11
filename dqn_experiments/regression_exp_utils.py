@@ -3,6 +3,7 @@ import numpy as np
 import torch
 import time
 import os
+import datetime
 
 from tqdm import tqdm
 
@@ -25,8 +26,9 @@ def run_experiment(
     print_freq: int = 5000,
 ):
     save_dir = "reg_models"
+    timestamp = datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
     os.makedirs(save_dir, exist_ok=True)
-    best_model_path = os.path.join(save_dir, "best_model.pt")
+    best_model_path = os.path.join(save_dir, f"best_model_{timestamp}.pt")
     val_env = gym_wrapper_state(
         gym.make(
             "MiniGrid-FourRooms-v1",
@@ -59,7 +61,7 @@ def run_experiment(
     n_samples = buffer.capacity
 
     start_time = time.time()
-    for step in (pbar := tqdm(range(1, timesteps + 1))):
+    for step in (pbar := tqdm(range(1, timesteps + 1), disable=True)):
         batch_idx = torch.randint(0, n_samples, (batch_size,), device=device)
         batch_x = X_train[batch_idx]
         batch_y = y_train[batch_idx]
