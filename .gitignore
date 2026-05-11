@@ -187,3 +187,4 @@ lib64
 bin
 job_scripts
 share/
+/reg_models
