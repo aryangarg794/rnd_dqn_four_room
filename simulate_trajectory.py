@@ -96,12 +96,22 @@ def simulate_trajectory(
         dqn_scores_dirs = dqn_scores_dirs / scale
         uvu = True
     else:
-        agent = DQN(env, deepcopy(env), hidden_layers=[50, 50], device=device)
+        agent = DQN(
+            env,
+            deepcopy(env),
+            device=device,
+            use_cnn=use_cnn,
+            use_action=True,
+            use_dual=False,
+            use_norm=True,
+            modulation='one_hot', 
+            hidden_layers=[512, 512, 512],
+        )
         agent.net.load_state_dict(
             torch.load(f"results/models/{file_name}.pt", weights_only=True)
         )
         agent.net.eval()
-        dqn_scores, _, dqn_scores_dirs = record_dqn_scores(agent, random_context, 0)
+        dqn_scores, _, dqn_scores_dirs = record_dqn_scores(agent, random_context, 0, use_cnn=use_cnn)
 
     context_info = env.get_wrapper_attr("context_info")(random_context)
     context_info = (*context_info, env.get_wrapper_attr("valid_pos"))

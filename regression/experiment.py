@@ -7,13 +7,14 @@ import matplotlib.pyplot as plt
 import numpy as np
 import random
 
+from tqdm import tqdm
+
 from four_room.arch import CNN
-from four_room.wrappers import gym_wrapper
+from four_room.wrappers import gym_wrapper_state
 from rnd_exploration.dataset import Dataset
 from four_room.constants import train_config, test_config, val_config, size
 
 device = "cuda" if torch.cuda.is_available() else "cpu"
-
 
 class RegressionModel(nn.Module):
 
@@ -22,7 +23,8 @@ class RegressionModel(nn.Module):
         env: gym.Env,
         val_env: gym.Env,
         feature_dim: int = 64,
-        hidden_layers: list = list([32, 32]),
+        use_cnn: bool = True, 
+        hidden_layers: list = list([128, 128]),
         activation: nn.Module = nn.ReLU,
         lr: float = 1e-3,
         device: str = "cpu",
@@ -32,9 +34,16 @@ class RegressionModel(nn.Module):
         super(RegressionModel, self).__init__(*args, **kwargs)
         self.env = env
 
-        self.feature_extractor = CNN(self.env.observation_space, feature_dim)
+        if use_cnn:
+            self.feature_extractor = CNN(self.env.observation_space, features_dim=feature_dim)
+        else:
+            self.feature_extractor = nn.Sequential(
+                nn.Linear(13, 128),
+                nn.ReLU(),
+                nn.Linear(128, feature_dim)
+            )
         self.layers = nn.Sequential()
-
+        self.use_cnn = use_cnn
         self.layers.extend([nn.Linear(feature_dim, hidden_layers[0]), activation()])
 
         # add more layers after the feature extractor
@@ -51,10 +60,18 @@ class RegressionModel(nn.Module):
         self.val_env = val_env
 
     def forward(self, obs):
+        obs = obs.float() 
+        if self.use_cnn:
+            obs = obs / 10
+        else:
+            coord_indices = [0, 1, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]
+            obs[:, coord_indices] = obs[:, coord_indices] / 18.0
+            obs[:, 2] = obs[:, 2] / 3.0
         x = self.feature_extractor(obs)
         x = self.layers(x)
         return x
 
+    @torch.no_grad()
     def validation(
         self, env: gym.Env, val_steps: int = 40  # hardcoded for number of val contexts
     ):
@@ -146,6 +163,7 @@ class Experiment:
         exp_name: str,
         timesteps: int,
         val_freq: int = 40,
+        use_cnn: bool = True, 
         batch_size: int = 256,
         seeds: list = list([0, 1, 2, 3, 4]),
         save_dir="results",
@@ -160,7 +178,7 @@ class Experiment:
         self.val_freq = val_freq
         self.device = "cuda" if torch.cuda.is_available() else "cpu"
 
-        self.env = gym_wrapper(
+        self.env = gym_wrapper_state(
             gym.make(
                 "MiniGrid-FourRooms-v1",
                 agent_pos=train_config["agent positions"],
@@ -169,10 +187,10 @@ class Experiment:
                 agent_dir=train_config["agent directions"],
                 size=size,
             ),
-            original_obs=True,
+            use_cnn=use_cnn,
         )
 
-        self.val_env = gym_wrapper(
+        self.val_env = gym_wrapper_state(
             gym.make(
                 "MiniGrid-FourRooms-v1",
                 agent_pos=val_config["agent positions"],
@@ -181,10 +199,10 @@ class Experiment:
                 agent_dir=val_config["agent directions"],
                 size=size,
             ),
-            original_obs=True,
+            use_cnn=use_cnn,
         )
 
-        self.test_env = gym_wrapper(
+        self.test_env = gym_wrapper_state(
             gym.make(
                 "MiniGrid-FourRooms-v1",
                 agent_pos=test_config["agent positions"],
@@ -193,7 +211,7 @@ class Experiment:
                 agent_dir=test_config["agent directions"],
                 size=size,
             ),
-            original_obs=True,
+            use_cnn=use_cnn,
         )
 
     def run_experiment(self, datasets: list, labels: list):

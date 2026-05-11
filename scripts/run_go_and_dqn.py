@@ -12,6 +12,7 @@ from copy import deepcopy
 from dataclasses import dataclass
 from tqdm import tqdm
 from collections import deque
+from tabulate import tabulate
 
 from four_room.env import FourRoomsEnv
 from four_room.utils import get_state
@@ -26,7 +27,6 @@ from utils.episode import LastEpisode
 from utils.exploration import aux_pos_multiple
 
 gym.register("MiniGrid-FourRooms-v1", FourRoomsEnv)
-
 
 @dataclass
 class Args:
@@ -76,6 +76,8 @@ def train_dqn_count(
     learning_curves = []
     scores = []
     uniqueness = []
+
+    at_end = True if regression_freq == -1 else False
 
     torch.backends.cudnn.deterministic = True
 
@@ -385,28 +387,34 @@ def train_dqn_count(
 
         agent.soft_update()
 
-        if step % regression_freq == 0 and agent.buffer.size >= agent.buffer.capacity:
-            lc, test_score = run_experiment(agent.buffer, device=args.device)
-            learning_curves.append(lc)
-            scores.append(test_score)
+        if at_end:
+            if step == num_timesteps:
+                lc, test_score = run_experiment(agent.buffer, use_cnn=args.use_cnn, device=args.device)
+                learning_curves.append(lc)
+                scores.append(test_score)
+        else:
+            if step % regression_freq == 0 and agent.buffer.size >= agent.buffer.capacity:
+                lc, test_score = run_experiment(agent.buffer, use_cnn=args.use_cnn, device=args.device)
+                learning_curves.append(lc)
+                scores.append(test_score)
 
-            results = {
-                "lc_curves": learning_curves,
-                "reg_test_scores": scores,
-                "uniqueness": uniqueness,
-                "images": imgs,
-                "heatmap": heatmap_swap,
-                "counter_full": counter_full,
-                "counter_moving": counter_moving,
-                "aux_heatmap": aux_heatmap,
-                "explore_heatmap": explore_heatmap,
-                "switch_states": switch_state_history,
-                "context_history": contexts,
-            }
-            with open(
-                f"results/dqn_exps/{args.dir}_seed_{args.seed}_intermediate.pl", "wb"
-            ) as file:
-                dill.dump(results, file)
+                results = {
+                    "lc_curves": learning_curves,
+                    "reg_test_scores": scores,
+                    "uniqueness": uniqueness,
+                    "images": imgs,
+                    "heatmap": heatmap_swap,
+                    "counter_full": counter_full,
+                    "counter_moving": counter_moving,
+                    "aux_heatmap": aux_heatmap,
+                    "explore_heatmap": explore_heatmap,
+                    "switch_states": switch_state_history,
+                    "context_history": contexts,
+                }
+                with open(
+                    f"results/dqn_exps/{args.dir}_seed_{args.seed}_intermediate.pl", "wb"
+                ) as file:
+                    dill.dump(results, file)
 
         uniqueness.append(agent.buffer.ratio_unique_trans)
         value = (dqn_val - rms_dqn.avg) / rms_dqn.std
@@ -424,9 +432,10 @@ def train_dqn_count(
         "lc_curves": learning_curves,
         "reg_test_scores": scores,
         "uniqueness": uniqueness,
-        "images": imgs,
+        "buffer": agent.buffer,
         "heatmap": heatmap_swap,
         "counter_full": counter_full,
+        "images": imgs,
         "counter_moving": counter_moving,
         "aux_heatmap": aux_heatmap,
         "explore_heatmap": explore_heatmap,
@@ -457,7 +466,7 @@ if __name__ == "__main__":
     parser.add_argument("-seed", "--seed", type=int, default=0, help="seed")
     parser.add_argument("-b", "--batch_size", type=int, default=64, help="batch size")
     parser.add_argument(
-        "-fr", "--freq", type=int, default=int(1e5), help="freq of regression"
+        "-fr", "--freq", type=int, default=-1, help="freq of regression"
     )
     parser.add_argument(
         "--window", type=int, default=2500, help="window size of rms_dqn"
@@ -466,7 +475,7 @@ if __name__ == "__main__":
     parser.add_argument("--debug", action="store_true", help="debug mode")
     parser.add_argument("--return_ones", action="store_true", help="return ones")
     parser.add_argument("-ed", "--eps_dqn", type=float, default=0.05, help="eps dqn")
-    parser.add_argument("-em", "--eps_mode", type=float, default=0.00, help="eps dqn")
+    parser.add_argument("-em", "--eps_mode", type=float, default=0.05, help="eps dqn")
     parser.add_argument(
         "--last_ep", type=int, default=10, help="window size of last_ep"
     )
@@ -577,6 +586,14 @@ if __name__ == "__main__":
         f"results/dqn_exps/{save_file_name}_{args.timesteps}.pl", "wb"
     ) as file:
         dill.dump(results, file)
+        file.close()
+
+    
+    data = [
+        [results['uniqueness'][-1], np.mean(results['reg_test_scores']), agent.buffer.size]
+    ]
+    headers = ["Uniqueness", "Test Score", "Buffer Size"]
+    print(tabulate(data, headers=headers, tablefmt="grid"))
 
     if args.render:
         imgs = list(results["images"])
