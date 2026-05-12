@@ -27,6 +27,8 @@ from uvu.uvu import UVU
 from utils.exploration import aux_pos_multiple
 
 gym.register("MiniGrid-FourRooms-v1", FourRoomsEnv)
+torch.set_num_interop_threads(1)
+torch.set_num_threads(1)
 
 
 @dataclass

@@ -28,6 +28,7 @@ class RegressionModel(nn.Module):
         activation: nn.Module = nn.ReLU,
         lr: float = 1e-3,
         device: str = "cpu",
+        loss: nn.Module = nn.MSELoss, 
         *args,
         **kwargs,
     ):
@@ -53,7 +54,7 @@ class RegressionModel(nn.Module):
         # final layer for predicting values
         self.layers.append(nn.Linear(hidden_layers[-1], self.env.action_space.n))
 
-        self.loss = nn.HuberLoss()
+        self.loss = loss()
         self.optimizer = torch.optim.Adam(self.parameters(), lr=lr)
         self.device = device
 
