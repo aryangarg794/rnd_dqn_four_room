@@ -83,7 +83,7 @@ def simulate_trajectory(
             hidden_layers_g=[512, 512],
             num_heads=512,
             use_cnn=use_cnn,
-            use_dual=True,
+            use_dual=False,
             use_norm=True,
             use_action=True,
             modulation='one_hot',

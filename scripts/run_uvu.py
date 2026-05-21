@@ -27,9 +27,6 @@ from uvu.uvu import UVU
 from utils.exploration import aux_pos_multiple
 
 gym.register("MiniGrid-FourRooms-v1", FourRoomsEnv)
-torch.set_num_interop_threads(1)
-torch.set_num_threads(1)
-
 
 @dataclass
 class Args:
@@ -173,7 +170,7 @@ def train_uvu_count(
     )
     counter_full = CountBasedUncertainty(capacity=args.capacity)
 
-    for step in (pbar := tqdm(range(1, num_timesteps + 1), disable=debug)):
+    for step in (pbar := tqdm(range(1, num_timesteps + 1), disable=debug, miniters=5000, maxinterval=float('inf'))):
 
         obs_torch = agent.get_obs(obs)
         state = get_state(obs, args.use_cnn)
@@ -300,7 +297,7 @@ def train_uvu_count(
             mode = False
             record = False
             if np.random.random() < eps_mode or step < warmupsteps:
-                mode = True  # true = explorego, false = our heuristic version
+                mode = True  
 
             actions, path = aux_pos_multiple(state, env)
             aux_pos = (path[-1][0], path[-1][1])
@@ -315,12 +312,6 @@ def train_uvu_count(
             current_context = env.get_wrapper_attr("context")
             start_state, _, _ = env.get_wrapper_attr("context_info")(current_context)
             trajs_added += 1
-
-            if step < warmupsteps:
-                max_k = len(env.get_wrapper_attr("valid_pos"))
-                k = np.random.randint(low=0, high=max_k)
-                target_pos = goal_pos  # goal state
-                env.get_wrapper_attr("move_valid_pos")(k)
 
         agent.soft_update()
 
@@ -357,13 +348,15 @@ def train_uvu_count(
         value = (uvu_val - rms_uvu.avg) / rms_uvu.std
         # pbar.set_description(f"Training RND DQN | Uniqueness: {agent.buffer.ratio_unique_trans:.4f} | Last Regression Exp: {(scores[-1] if len(scores) > 0 else 0):.4f} | Total Items added: {items_added} | Current Context: {current_context} | RND Val: {dqn_val:.4f} | Avg: {rms_dqn.avg:.4f} | STD: {rms_dqn.std:.4f} | Switches: {switches} | Value: {value:.4f}")
         reg_exp = scores[-1] if len(scores) > 0 else 0
-        pbar.set_description(f"Items added: {items_added} | Context: {current_context}")
         pbar.set_postfix(
             unq=agent.buffer.ratio_unique_trans,
             norm_avg=rms_norms.avg,
             reg=reg_exp,
             switches=switches,
             uvu_avg=rms_uvu.avg,
+            items=items_added,
+            context=current_context,
+            refresh=False
         )
 
     return {
@@ -391,7 +384,7 @@ if __name__ == "__main__":
         "-t", "--timesteps", type=int, default=int(3e5), help="timesteps"
     )
     parser.add_argument("-f", "--dir", type=str, default="uvu", help="save name")
-    parser.add_argument("-a", "--alpha", type=float, default=1.0, help="alpha")
+    parser.add_argument("-a", "--alpha", type=float, default=0.5, help="alpha")
     parser.add_argument(
         "-ag", "--lr_agent", type=float, default=1e-4, help="lr for dqn agent"
     )

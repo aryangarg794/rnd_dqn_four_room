@@ -233,7 +233,7 @@ class Experiment:
 
                 print(f"=============Seed {seed}===============\n")
                 for i, dataset in enumerate(datasets):
-                    model = RegressionModel(self.env, self.val_env, device=device).to(
+                    model = RegressionModel(self.env, self.val_env, device=self.device).to(
                         device=device
                     )
                     val_rewards = model.run(
