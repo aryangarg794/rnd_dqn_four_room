@@ -1,6 +1,7 @@
 import gymnasium as gym
 import numpy as np
 import torch
+import random
 import time
 import os
 import datetime
@@ -25,8 +26,18 @@ def run_experiment(
     disable: bool = False, 
     loss: torch.nn.Module = torch.nn.MSELoss, 
     use_cnn: bool = False, 
+    seed: int = 0, 
     print_freq: int = 5000,
 ):
+    random.seed(seed)
+    np.random.seed(seed)
+    torch.manual_seed(seed)
+    if "cuda" in str(device):
+        torch.cuda.manual_seed(seed)
+        torch.cuda.manual_seed_all(seed)
+        torch.backends.cudnn.deterministic = True
+        torch.backends.cudnn.benchmark = False
+    
     save_dir = "reg_models"
     timestamp = datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
     os.makedirs(save_dir, exist_ok=True)

@@ -317,7 +317,7 @@ def train_uvu_count(
 
         if at_end:
             if step == num_timesteps:
-                lc, test_score = run_experiment(agent.buffer, use_cnn=args.use_cnn, device=args.device, disable=True)
+                lc, test_score = run_experiment(agent.buffer, use_cnn=args.use_cnn, device=args.device, disable=True, seed=args.seed)
                 learning_curves.append(lc)
                 scores.append(test_score)
         else:
@@ -467,7 +467,7 @@ if __name__ == "__main__":
     name_lr = "_lr" + str(args.lr_agent).replace(".", "")
     name_bs = "_bs" + str(args.batch_size)
     name_tau = "_tau" + str(args.tau).replace(".", "")
-    name_eps = "_eps" + str(args.eps_dqn).replace(".", "")
+    name_eps = "_eps" + str(args.eps_mode).replace(".", "")
 
     group_name = (
         f"{args.dir}{name_alpha}{name_lr}{name_bs}{name_tau}{name_eps}"
