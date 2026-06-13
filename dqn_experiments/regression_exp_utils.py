@@ -24,7 +24,7 @@ def run_experiment(
     batch_size: int = 64,
     device: str = "cuda",
     disable: bool = False, 
-    loss: torch.nn.Module = torch.nn.MSELoss, 
+    loss_fn: torch.nn.Module = torch.nn.MSELoss, 
     use_cnn: bool = False, 
     seed: int = 0, 
     print_freq: int = 5000,
@@ -66,7 +66,7 @@ def run_experiment(
         use_cnn=use_cnn,
     )
     val_scores = []
-    model = RegressionModel(val_env, val_env, device=device, use_cnn=use_cnn, loss=loss).to(device=device)
+    model = RegressionModel(val_env, val_env, device=device, use_cnn=use_cnn, loss=loss_fn).to(device=device)
     best_val_score = -float('inf')
 
     X_train = buffer.states.to(device).float()
