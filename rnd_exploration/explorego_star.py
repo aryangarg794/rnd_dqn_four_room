@@ -11,7 +11,8 @@ from four_room.shortest_path import find_all_action_values
 from four_room.wrappers import gym_wrapper
 from rnd_exploration.dataset import ExploreGoDataset, Transition
 from rnd_exploration.rnd import RNDNetwork
-from rnd_exploration.utils import RunningAverage, train_config, test_config, size
+from rnd_exploration.utils import train_config, test_config, size
+from utils.statistics import RunningAverage
 
 gym.register("MiniGrid-FourRooms-v1", FourRoomsEnv)
 

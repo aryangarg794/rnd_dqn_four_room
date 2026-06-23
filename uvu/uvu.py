@@ -5,7 +5,7 @@ import gymnasium as gym
 
 from copy import deepcopy
 
-from rnd_exploration.dataset import ReplayBufferBoot
+from buffers.buffers import ReplayBufferBoot
 from four_room.arch import CNN
 from utils.episode import LastEpisode
 from four_room.utils import obs_to_state
@@ -120,7 +120,7 @@ class UVU:
         gamma: float = 0.99,
         start_epsilon: float = 0.99,
         max_decay: float = 0.1,
-        modulation: str = 'concat', 
+        modulation: str = "concat",
         decay_steps: float = 10000,
         lr: float = 5e-4,
         act: nn.Module = nn.ReLU,
@@ -131,9 +131,9 @@ class UVU:
         device: str = "cuda",
         grad_norm: float = 10.0,
         zero_params: bool = False,
-        uvu_sparsity: float = 0.5, 
+        uvu_sparsity: float = 0.5,
         scale: float = 1.0,
-        residual: bool = True, 
+        residual: bool = True,
         init_func: str = "kaiming",
         *args,
         **kwargs,
@@ -203,7 +203,6 @@ class UVU:
             for param in self.net.parameters():
                 mask = 1 - torch.bernoulli(torch.full_like(param.data, uvu_sparsity))
                 param.data = param.data * mask
-            
 
         self.env = env
         self.val_env = val_env
@@ -336,8 +335,8 @@ class UVU:
             targets = batch_rewards + self.gamma * target_vals * (1 - batch_dones)
 
         q_values = self.net(batch_obs).gather(dim=-1, index=batch_actions)
-        loss_heads = 0.5 * ((targets - q_values) ** 2) * batch_masks.unsqueeze(
-            dim=-1
+        loss_heads = (
+            0.5 * ((targets - q_values) ** 2) * batch_masks.unsqueeze(dim=-1)
         )  # (b, m, 1)
         loss_heads = loss_heads.squeeze(-1)
         # sum the heads * mask and then mean over the batch

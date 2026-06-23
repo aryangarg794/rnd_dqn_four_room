@@ -16,6 +16,7 @@ from four_room.constants import train_config, test_config, val_config, size
 
 device = "cuda" if torch.cuda.is_available() else "cpu"
 
+
 class RegressionModel(nn.Module):
 
     def __init__(
@@ -23,12 +24,12 @@ class RegressionModel(nn.Module):
         env: gym.Env,
         val_env: gym.Env,
         feature_dim: int = 64,
-        use_cnn: bool = True, 
+        use_cnn: bool = True,
         hidden_layers: list = list([128, 128]),
         activation: nn.Module = nn.ReLU,
         lr: float = 1e-3,
         device: str = "cpu",
-        loss: nn.Module = nn.MSELoss, 
+        loss: nn.Module = nn.MSELoss,
         *args,
         **kwargs,
     ):
@@ -36,12 +37,12 @@ class RegressionModel(nn.Module):
         self.env = env
 
         if use_cnn:
-            self.feature_extractor = CNN(self.env.observation_space, features_dim=feature_dim)
+            self.feature_extractor = CNN(
+                self.env.observation_space, features_dim=feature_dim
+            )
         else:
             self.feature_extractor = nn.Sequential(
-                nn.Linear(13, 128),
-                nn.ReLU(),
-                nn.Linear(128, feature_dim)
+                nn.Linear(13, 128), nn.ReLU(), nn.Linear(128, feature_dim)
             )
         self.layers = nn.Sequential()
         self.use_cnn = use_cnn
@@ -61,7 +62,7 @@ class RegressionModel(nn.Module):
         self.val_env = val_env
 
     def forward(self, obs):
-        obs = obs.float() 
+        obs = obs.float()
         if self.use_cnn:
             obs = obs / 10
         else:
@@ -164,7 +165,7 @@ class Experiment:
         exp_name: str,
         timesteps: int,
         val_freq: int = 40,
-        use_cnn: bool = True, 
+        use_cnn: bool = True,
         batch_size: int = 256,
         seeds: list = list([0, 1, 2, 3, 4]),
         save_dir="results",
@@ -233,9 +234,9 @@ class Experiment:
 
                 print(f"=============Seed {seed}===============\n")
                 for i, dataset in enumerate(datasets):
-                    model = RegressionModel(self.env, self.val_env, device=self.device).to(
-                        device=device
-                    )
+                    model = RegressionModel(
+                        self.env, self.val_env, device=self.device
+                    ).to(device=device)
                     val_rewards = model.run(
                         dataset,
                         timesteps=self.timesteps,

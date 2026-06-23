@@ -6,28 +6,36 @@ import argparse
 
 from tqdm import tqdm
 
-from rnd_exploration.dataset import ReplayBuffer
+from buffers.buffers import ReplayBufferBase
 from four_room.env import FourRoomsEnv
 from four_room.utils import obs_to_state
 from four_room.shortest_path import find_all_action_values
-from four_room.constants import train_config, val_config, test_config, size, state_to_q_np
+from four_room.constants import (
+    train_config,
+    val_config,
+    test_config,
+    size,
+    state_to_q_np,
+)
 from four_room.wrappers import gym_wrapper_state
-from four_room.utils import get_state 
+from four_room.utils import get_state
 from utils.exploration import aux_pos_multiple
 
 gym.register("MiniGrid-FourRooms-v1", FourRoomsEnv)
 
+
 class PseudoBuffer:
-    
+
     def __init__(self):
         self.states = []
         self.q_values = []
-        self.capacity = 0 
-    
+        self.capacity = 0
+
     def add(self, x, y):
         self.states.append(torch.tensor(x))
         self.q_values.append(torch.tensor(y))
         self.capacity += 1
+
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
@@ -35,7 +43,7 @@ if __name__ == "__main__":
     args = parser.parse_args()
     name_cnn = "cnn" if args.use_cnn else "mlp"
 
-    print(f'Recording for full_dataset_{name_cnn}')
+    print(f"Recording for full_dataset_{name_cnn}")
 
     env = gym_wrapper_state(
         gym.make(
@@ -51,7 +59,7 @@ if __name__ == "__main__":
     )
 
     # buffer = PseudoBuffer()
-    buffer = ReplayBuffer((3, 19, 19), False, capacity=207200)
+    buffer = ReplayBufferBase((3, 19, 19), False, capacity=207200)
     print(buffer.size)
 
     # for i in range(len(train_config["topologies"])):
@@ -81,7 +89,6 @@ if __name__ == "__main__":
     # with open(f'action_values/full_dataset_{name_cnn}.pl', 'wb') as file:
     #     dill.dump(buffer, file)
     #     file.close()
-
 
     # while buffer.capacity < 207200:
     #     for i in range(len(train_config["topologies"])):
@@ -127,8 +134,12 @@ if __name__ == "__main__":
                 done = trunc or term
                 obs = obs_next
 
-                print(f"Context is {context+1} | {state[:3]} | Size: {buffer.size}", end='\r', flush=True)
+                print(
+                    f"Context is {context+1} | {state[:3]} | Size: {buffer.size}",
+                    end="\r",
+                    flush=True,
+                )
 
-    with open(f'action_values/full_dataset_{name_cnn}_expl.pl', 'wb') as file:
+    with open(f"action_values/full_dataset_{name_cnn}_expl.pl", "wb") as file:
         dill.dump(buffer, file)
         file.close()

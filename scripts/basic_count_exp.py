@@ -15,6 +15,7 @@ from collections import deque
 
 # from line_profiler import profile
 
+from buffers.buffers import ReplayBufferBase
 from four_room.env import FourRoomsEnv
 from four_room.utils import obs_to_state
 from four_room.shortest_path import (
@@ -24,9 +25,9 @@ from four_room.shortest_path import (
 )
 from four_room.wrappers import gym_wrapper
 from four_room.constants import train_config, val_config, test_config, size, state_to_q
-from rnd_exploration.utils import RunningAverage
+from utils.statistics import RunningAverage
 from dqn_experiments.regression_exp_utils import run_experiment
-from rnd_exploration.dataset import ReplayBuffer, State
+from rnd_exploration.dataset import State
 from dqn.counter import CountBasedUncertainty, MovingCountBasedUncertainty
 
 gym.register("MiniGrid-FourRooms-v1", FourRoomsEnv)
@@ -75,7 +76,7 @@ def train_basic_count(
     torch.cuda.manual_seed(seed)
     torch.cuda.manual_seed_all(seed)
 
-    buffer = ReplayBuffer(
+    buffer = ReplayBufferBase(
         args.env.observation_space.shape,
         args.env.action_space.n,
         capacity=args.capacity,

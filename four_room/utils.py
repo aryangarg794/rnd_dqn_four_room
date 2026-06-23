@@ -157,6 +157,7 @@ def reverse_doors(obs, size=19):
 
     return doors
 
+
 def get_state(obs, use_cnn):
     if use_cnn:
         return obs_to_state(obs)

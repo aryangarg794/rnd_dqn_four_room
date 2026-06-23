@@ -12,6 +12,7 @@ from four_room.arch import ConvSequence
 
 coord_indices = [0, 1, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]
 
+
 @torch.no_grad()
 def _kaiming_init(m):
     if hasattr(m, "weight"):
@@ -195,7 +196,7 @@ class DQNBaseAction(CustomQNetwork):
         embed_dim: int = 8,
         hidden_layers: list = [256, 512],
         norm: bool = True,
-        modulation: str = 'concat',
+        modulation: str = "concat",
         residual: bool = True,
         max_pool: bool = True,
         init: str = "kaiming",
@@ -253,14 +254,14 @@ class DQNBaseAction(CustomQNetwork):
             ]
         )
 
-        if modulation == 'one_hot':
+        if modulation == "one_hot":
             inp_dim = hidden_layers[0] + action_space.n
-        elif modulation == 'concat':
+        elif modulation == "concat":
             inp_dim = 2 * hidden_layers[0]
         else:
             inp_dim = hidden_layers[0]
 
-        if not modulation == 'one_hot':
+        if not modulation == "one_hot":
             self.act_embed = nn.Embedding(action_space.n, embed_dim)
             self.act_layers.extend(
                 [nn.Linear(embed_dim, 64), act(), nn.Linear(64, hidden_layers[0])]
@@ -302,17 +303,17 @@ class DQNBaseAction(CustomQNetwork):
 
         obs = self.obs_layers(obs)
 
-        if self.modulation == 'one_hot':
+        if self.modulation == "one_hot":
             act = nn.functional.one_hot(act, 3).float().squeeze(1)
         else:
             act = self.act_embed(act).squeeze(dim=1)
             act = self.act_layers(act)
 
-        if self.modulation == 'one_hot' or self.modulation == 'concat':
+        if self.modulation == "one_hot" or self.modulation == "concat":
             inp = torch.cat([obs, act], dim=-1)
-        elif self.modulation == 'mult':
+        elif self.modulation == "mult":
             inp = obs * act
-        elif self.modulation == 'add':
+        elif self.modulation == "add":
             inp = obs + act
 
         return self.layers(inp)
@@ -329,7 +330,9 @@ class DQNBaseAction(CustomQNetwork):
             .repeat_interleave(batch_size)
             .reshape(-1, 1)
         )
-        q_vals = self._forward_act(batched_input, batched_act).view(num_actions, batch_size, self.num_heads)
+        q_vals = self._forward_act(batched_input, batched_act).view(
+            num_actions, batch_size, self.num_heads
+        )
         return q_vals.permute(1, 0, 2).reshape(batch_size, -1)
 
 
@@ -341,7 +344,7 @@ class DQNBaseDual(CustomQNetwork):
         action_space: gym.spaces.Discrete,
         hidden_layers: list = [256, 512],
         norm: bool = True,
-        modulation: str = 'concat', 
+        modulation: str = "concat",
         init: str = "kaiming",
         act: nn.Module = nn.ReLU,
         num_heads: int = 1,
@@ -369,7 +372,7 @@ class DQNBaseDual(CustomQNetwork):
             [nn.Linear(10, 128), act(), nn.Linear(128, hidden_layers[0])]
         )
 
-        if self.modulation == 'concat':
+        if self.modulation == "concat":
             inp_dim = 2 * hidden_layers[0]
         else:
             inp_dim = hidden_layers[0]
@@ -408,9 +411,9 @@ class DQNBaseDual(CustomQNetwork):
         agent_info = self.obs_layers(agent_info)
         context = self.context_layers(context)
 
-        if self.modulation == 'concat':
+        if self.modulation == "concat":
             inp = torch.cat([obs, context], dim=-1)
-        elif self.modulation == 'mult':
+        elif self.modulation == "mult":
             inp = obs * context
         else:
             inp = obs + context
@@ -428,7 +431,7 @@ class DQNBaseDualAction(CustomQNetwork):
         hidden_layers: list = [256, 512],
         norm: bool = True,
         init: str = "kaiming",
-        modulation: str = "concat", 
+        modulation: str = "concat",
         act: nn.Module = nn.ReLU,
         num_heads: int = 1,
     ) -> None:
@@ -461,19 +464,19 @@ class DQNBaseDualAction(CustomQNetwork):
             [nn.Linear(embed_dim, 128), act(), nn.Linear(128, hidden_layers[0])]
         )
 
-        if modulation == 'one_hot':
+        if modulation == "one_hot":
             inp_dim = hidden_layers[0] + action_space.n
-        elif modulation == 'concat_act':
+        elif modulation == "concat_act":
             inp_dim = 2 * hidden_layers[0]
-        elif modulation == 'concat_dual':
+        elif modulation == "concat_dual":
             inp_dim = 2 * hidden_layers[0]
-        elif modulation == 'concat_act_add':
+        elif modulation == "concat_act_add":
             inp_dim = 2 * hidden_layers[0]
-        elif modulation == 'concat':
+        elif modulation == "concat":
             inp_dim = 3 * hidden_layers[0]
         else:
-            inp_dim = hidden_layers[0] 
-        
+            inp_dim = hidden_layers[0]
+
         self.layers.extend(
             [
                 L2Norm() if norm else nn.Identity(),
@@ -501,34 +504,34 @@ class DQNBaseDualAction(CustomQNetwork):
     def _forward_act(self, obs, act):
         obs[:, coord_indices] = obs[:, coord_indices] / 18.0
         obs[:, 2] = obs[:, 2] / 3.0
-        
+
         agent_info = obs[:, :3]
         context = obs[:, 3:]
 
-        if self.modulation == 'one_hot':
+        if self.modulation == "one_hot":
             act = nn.functional.one_hot(act, 3).float().squeeze(1)
         else:
             act = self.act_embed(act).squeeze(dim=1)
             act = self.act_layers(act)
-        
+
         agent_info = self.obs_layers(agent_info)
         context = self.context_layers(context)
 
-        if self.modulation == 'one_hot':
+        if self.modulation == "one_hot":
             inp = torch.cat([agent_info * context, act], dim=-1)
-        elif self.modulation == 'concat':
+        elif self.modulation == "concat":
             inp = torch.cat([agent_info, act, context], dim=-1)
-        elif self.modulation == 'concat_dual':
+        elif self.modulation == "concat_dual":
             inp = torch.cat([agent_info * act, context], dim=-1)
-        elif self.modulation == 'concat_act_add':
+        elif self.modulation == "concat_act_add":
             inp = torch.cat([agent_info + act, context], dim=-1)
-        elif self.modulation == 'concat_act':
+        elif self.modulation == "concat_act":
             inp = torch.cat([agent_info * context, act], dim=-1)
-        elif self.modulation == 'mult':
+        elif self.modulation == "mult":
             inp = agent_info * context * act
-        elif self.modulation == 'add':
+        elif self.modulation == "add":
             inp = agent_info + context + act
-        
+
         return self.layers(inp)
 
     def forward(self, obs):
@@ -543,7 +546,9 @@ class DQNBaseDualAction(CustomQNetwork):
             .repeat_interleave(batch_size)
             .reshape(-1, 1)
         )
-        q_vals = self._forward_act(batched_input, batched_act).view(num_actions, batch_size, self.num_heads)
+        q_vals = self._forward_act(batched_input, batched_act).view(
+            num_actions, batch_size, self.num_heads
+        )
         return q_vals.permute(1, 0, 2).reshape(batch_size, -1)
 
 
@@ -559,7 +564,7 @@ class DQNBasePolicy(DQNPolicy):
         use_dual=False,
         use_action=False,
         use_norm=True,
-        modulation='concat',
+        modulation="concat",
         init_func="kaiming",
         activation_fn=nn.ReLU,
         features_extractor_class=...,
@@ -595,7 +600,7 @@ class DQNBasePolicy(DQNPolicy):
                     action_space=self.action_space,
                     norm=self.use_norm,
                     init=self.init_func,
-                    modulation=self.modulation
+                    modulation=self.modulation,
                 )
             else:
                 model = DQNBaseDual(
@@ -603,7 +608,7 @@ class DQNBasePolicy(DQNPolicy):
                     action_space=self.action_space,
                     norm=self.use_norm,
                     init=self.init_func,
-                    modulation=self.modulation
+                    modulation=self.modulation,
                 )
         else:
             if self.use_action:
@@ -645,11 +650,11 @@ class UVUBase(nn.Module):
         use_action=False,
         use_norm=True,
         init_func="kaiming",
-        modulation='concat',
+        modulation="concat",
         hidden_layers=list([256, 512]),
         activation_fn=nn.ReLU,
         num_heads=10,
-        residual=True, 
+        residual=True,
         scale=1,
         *args,
         **kwargs
@@ -700,7 +705,7 @@ class UVUBase(nn.Module):
                     num_heads=num_heads,
                     hidden_layers=hidden_layers,
                     modulation=self.modulation,
-                    residual=residual, 
+                    residual=residual,
                 )
             else:
                 model = DQNBase(
@@ -751,7 +756,7 @@ class DQNModule(nn.Module):
         self.use_norm = use_norm
         self.init_func = init_func
         self.num_actions = action_space.n
-        self.modulation = modulation 
+        self.modulation = modulation
 
         if self.use_dual:
             if self.use_action:
@@ -762,7 +767,7 @@ class DQNModule(nn.Module):
                     init=self.init_func,
                     act=activation_fn,
                     hidden_layers=hidden_layers,
-                    modulation=self.modulation
+                    modulation=self.modulation,
                 )
             else:
                 model = DQNBaseDual(
@@ -772,7 +777,7 @@ class DQNModule(nn.Module):
                     init=self.init_func,
                     act=activation_fn,
                     hidden_layers=hidden_layers,
-                    modulation=self.modulation
+                    modulation=self.modulation,
                 )
         else:
             if self.use_action:
@@ -784,7 +789,7 @@ class DQNModule(nn.Module):
                     init=self.init_func,
                     act=activation_fn,
                     hidden_layers=hidden_layers,
-                    modulation=self.modulation
+                    modulation=self.modulation,
                 )
             else:
                 model = DQNBase(

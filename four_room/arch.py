@@ -82,7 +82,7 @@ class ConvSequence(nn.Module):
         self,
         input_shape,
         out_channels,
-        act=nn.LeakyReLU,
+        act=nn.ReLU,
         max_pool=True,
         init_function="orthogonal",
         residual=True,
@@ -151,7 +151,7 @@ class CNN(BaseFeaturesExtractor):
     def __init__(
         self,
         observation_space: gym.spaces.Box,
-        act=nn.LeakyReLU,
+        act=nn.ReLU,
         features_dim: int = 64,
         load_file=None,
         freeze_linear=False,

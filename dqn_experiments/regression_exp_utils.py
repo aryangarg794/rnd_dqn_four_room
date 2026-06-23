@@ -9,7 +9,7 @@ import datetime
 from tqdm import tqdm
 
 from regression.experiment import RegressionModel
-from rnd_exploration.dataset import ReplayBuffer
+from buffers.buffers import ReplayBufferBase
 from four_room.wrappers import gym_wrapper_state
 from four_room.env import FourRoomsEnv
 from four_room.constants import val_config, test_config, size
@@ -18,15 +18,15 @@ gym.register("MiniGrid-FourRooms-v1", FourRoomsEnv)
 
 
 def run_experiment(
-    buffer: ReplayBuffer,
+    buffer: ReplayBufferBase,
     timesteps: int = int(5e5),
     val_freq: int = int(1e4),
     batch_size: int = 64,
     device: str = "cuda",
-    disable: bool = False, 
-    loss_fn: torch.nn.Module = torch.nn.MSELoss, 
-    use_cnn: bool = False, 
-    seed: int = 0, 
+    disable: bool = False,
+    loss_fn: torch.nn.Module = torch.nn.MSELoss,
+    use_cnn: bool = False,
+    seed: int = 0,
     print_freq: int = 5000,
 ):
     random.seed(seed)
@@ -37,7 +37,7 @@ def run_experiment(
         torch.cuda.manual_seed_all(seed)
         torch.backends.cudnn.deterministic = True
         torch.backends.cudnn.benchmark = False
-    
+
     save_dir = "reg_models"
     timestamp = datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
     os.makedirs(save_dir, exist_ok=True)
@@ -66,8 +66,10 @@ def run_experiment(
         use_cnn=use_cnn,
     )
     val_scores = []
-    model = RegressionModel(val_env, val_env, device=device, use_cnn=use_cnn, loss=loss_fn).to(device=device)
-    best_val_score = -float('inf')
+    model = RegressionModel(
+        val_env, val_env, device=device, use_cnn=use_cnn, loss=loss_fn
+    ).to(device=device)
+    best_val_score = -float("inf")
 
     X_train = buffer.states.to(device).float()
     y_train = buffer.q_values.to(device).float()
@@ -95,8 +97,8 @@ def run_experiment(
                 best_val_score = val_reward
 
         postfix = {}
-        postfix['loss'] = loss.item()
-        postfix['val_score'] = val_scores[-1] if len(val_scores) > 0 else 0.0
+        postfix["loss"] = loss.item()
+        postfix["val_score"] = val_scores[-1] if len(val_scores) > 0 else 0.0
         pbar.set_postfix(postfix)
 
     if os.path.exists(best_model_path):

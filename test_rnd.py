@@ -14,9 +14,11 @@ from four_room.utils import obs_to_state
 from four_room.constants import train_config, test_config, val_config, size
 from collections import deque
 from rnd_exploration.dataset import ExploreGoDataset, Transition
-from rnd_exploration.utils import compare, RunningAverage
+from rnd_exploration.utils import compare
 
 import warnings
+
+from utils.statistics import RunningAverage
 
 warnings.filterwarnings(action="once")
 device = "cuda" if torch.cuda.is_available() else "cpu"

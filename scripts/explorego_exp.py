@@ -13,12 +13,13 @@ from dataclasses import dataclass
 from tqdm import tqdm
 from collections import deque
 
+from buffers.buffers import ReplayBufferBase
 from four_room.env import FourRoomsEnv
 from four_room.utils import obs_to_state
 from four_room.wrappers import gym_wrapper
 from four_room.constants import train_config, val_config, test_config, size, state_to_q
 from dqn_experiments.regression_exp_utils import run_experiment
-from rnd_exploration.dataset import ReplayBuffer, State
+from rnd_exploration.dataset import State
 from utils.exploration import explorego_exploration, explorego_multiple
 
 gym.register("MiniGrid-FourRooms-v1", FourRoomsEnv)
@@ -57,7 +58,7 @@ def train_explorego(
     torch.cuda.manual_seed(seed)
     torch.cuda.manual_seed_all(seed)
 
-    buffer = ReplayBuffer(
+    buffer = ReplayBufferBase(
         args.env.observation_space.shape,
         args.env.action_space.n,
         capacity=args.capacity,

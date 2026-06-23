@@ -19,7 +19,7 @@ from four_room.env import FourRoomsEnv
 from four_room.utils import get_state
 from four_room.wrappers import gym_wrapper_state
 from four_room.constants import state_to_q_np
-from rnd_exploration.utils import RunningAverage
+from utils.statistics import RunningAverage
 from four_room.constants import train_config, val_config, test_config, size
 from rnd_exploration.dataset import State
 from dqn_experiments.regression_exp_utils import run_experiment
@@ -27,6 +27,7 @@ from uvu.uvu import UVU
 from utils.exploration import aux_pos_multiple
 
 gym.register("MiniGrid-FourRooms-v1", FourRoomsEnv)
+
 
 @dataclass
 class Args:
@@ -99,7 +100,7 @@ def train_uvu_count(
         use_dual=args.use_dual,
         use_norm=args.use_norm,
         init_func=args.init,
-        modulation=args.mod, 
+        modulation=args.mod,
         num_heads=args.num_heads,
         gamma=gamma,
     )
@@ -170,7 +171,14 @@ def train_uvu_count(
     )
     counter_full = CountBasedUncertainty(capacity=args.capacity)
 
-    for step in (pbar := tqdm(range(1, num_timesteps + 1), disable=debug, miniters=5000, maxinterval=float('inf'))):
+    for step in (
+        pbar := tqdm(
+            range(1, num_timesteps + 1),
+            disable=debug,
+            miniters=5000,
+            maxinterval=float("inf"),
+        )
+    ):
 
         obs_torch = agent.get_obs(obs)
         state = get_state(obs, args.use_cnn)
@@ -297,7 +305,7 @@ def train_uvu_count(
             mode = False
             record = False
             if np.random.random() < eps_mode or step < warmupsteps:
-                mode = True  
+                mode = True
 
             actions, path = aux_pos_multiple(state, env)
             aux_pos = (path[-1][0], path[-1][1])
@@ -317,12 +325,23 @@ def train_uvu_count(
 
         if at_end:
             if step == num_timesteps:
-                lc, test_score = run_experiment(agent.buffer, use_cnn=args.use_cnn, device=args.device, disable=True, seed=args.seed)
+                lc, test_score = run_experiment(
+                    agent.buffer,
+                    use_cnn=args.use_cnn,
+                    device=args.device,
+                    disable=True,
+                    seed=args.seed,
+                )
                 learning_curves.append(lc)
                 scores.append(test_score)
         else:
-            if step % regression_freq == 0 and agent.buffer.size >= agent.buffer.capacity:
-                lc, test_score = run_experiment(agent.buffer, use_cnn=args.use_cnn, device=args.device, disable=True)
+            if (
+                step % regression_freq == 0
+                and agent.buffer.size >= agent.buffer.capacity
+            ):
+                lc, test_score = run_experiment(
+                    agent.buffer, use_cnn=args.use_cnn, device=args.device, disable=True
+                )
                 learning_curves.append(lc)
                 scores.append(test_score)
 
@@ -340,7 +359,8 @@ def train_uvu_count(
                     "context_history": contexts,
                 }
                 with open(
-                    f"results/dqn_exps/{args.dir}_seed_{args.seed}_intermediate.pl", "wb"
+                    f"results/dqn_exps/{args.dir}_seed_{args.seed}_intermediate.pl",
+                    "wb",
                 ) as file:
                     dill.dump(results, file)
 
@@ -356,7 +376,7 @@ def train_uvu_count(
             uvu_avg=rms_uvu.avg,
             items=items_added,
             context=current_context,
-            refresh=False
+            refresh=False,
         )
 
     return {
@@ -469,9 +489,7 @@ if __name__ == "__main__":
     name_tau = "_tau" + str(args.tau).replace(".", "")
     name_eps = "_eps" + str(args.eps_mode).replace(".", "")
 
-    group_name = (
-        f"{args.dir}{name_alpha}{name_lr}{name_bs}{name_tau}{name_eps}"
-    )
+    group_name = f"{args.dir}{name_alpha}{name_lr}{name_bs}{name_tau}{name_eps}"
     save_file_name = f"{group_name}_seed_{args.seed}"
 
     aux_args = Args(
@@ -480,7 +498,7 @@ if __name__ == "__main__":
         seed=args.seed,
         val_env=val_env,
         lr_agent=args.lr_agent,
-        device=args.device,
+        device=args.device if torch.cuda.is_available() else "cpu",
         capacity=args.replaysize,
         tau=args.tau,
         use_cnn=args.use_cnn,
@@ -488,7 +506,7 @@ if __name__ == "__main__":
         use_dual=args.use_dual,
         use_norm=args.use_norm,
         init=args.init,
-        mod=args.mod
+        mod=args.mod,
     )
 
     results, agent = train_uvu_count(
@@ -514,7 +532,11 @@ if __name__ == "__main__":
         file.close()
 
     data = [
-        [results['uniqueness'][-1], np.mean(results['reg_test_scores']), agent.buffer.size]
+        [
+            results["uniqueness"][-1],
+            np.mean(results["reg_test_scores"]),
+            agent.buffer.size,
+        ]
     ]
     headers = ["Uniqueness", "Test Score", "Buffer Size"]
     print(tabulate(data, headers=headers, tablefmt="grid"))

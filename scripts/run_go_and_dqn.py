@@ -18,7 +18,7 @@ from four_room.env import FourRoomsEnv
 from four_room.utils import get_state
 from four_room.wrappers import gym_wrapper_state
 from four_room.constants import state_to_q_np
-from rnd_exploration.utils import RunningAverage
+from utils.statistics import RunningAverage
 from four_room.constants import train_config, val_config, test_config, size
 from dqn_experiments.regression_exp_utils import run_experiment
 from dqn.model import DQN
@@ -27,6 +27,7 @@ from utils.episode import LastEpisode
 from utils.exploration import aux_pos_multiple
 
 gym.register("MiniGrid-FourRooms-v1", FourRoomsEnv)
+
 
 @dataclass
 class Args:
@@ -99,7 +100,7 @@ def train_dqn_count(
         use_dual=args.use_dual,
         use_norm=args.use_norm,
         init_func=args.init,
-        modulation=args.mod, 
+        modulation=args.mod,
         hidden_layers=[512, 512, 512],
         residual=True,
     )
@@ -192,7 +193,9 @@ def train_dqn_count(
             action = q.argmax() if isinstance(q, np.ndarray) else np.array(q).argmax()
 
         with torch.no_grad():
-            goal_action = state_to_q_np[current_context, state[0], state[1], state[2]].argmax()
+            goal_action = state_to_q_np[
+                current_context, state[0], state[1], state[2]
+            ].argmax()
             dqn_val = agent(obs_torch).squeeze()[goal_action].item()
             obj_tuple = tuple([int(item) for item in state])
             obj_tuple = (*obj_tuple, current_context)
@@ -389,12 +392,19 @@ def train_dqn_count(
 
         if at_end:
             if step == num_timesteps:
-                lc, test_score = run_experiment(agent.buffer, use_cnn=args.use_cnn, device=args.device)
+                lc, test_score = run_experiment(
+                    agent.buffer, use_cnn=args.use_cnn, device=args.device
+                )
                 learning_curves.append(lc)
                 scores.append(test_score)
         else:
-            if step % regression_freq == 0 and agent.buffer.size >= agent.buffer.capacity:
-                lc, test_score = run_experiment(agent.buffer, use_cnn=args.use_cnn, device=args.device)
+            if (
+                step % regression_freq == 0
+                and agent.buffer.size >= agent.buffer.capacity
+            ):
+                lc, test_score = run_experiment(
+                    agent.buffer, use_cnn=args.use_cnn, device=args.device
+                )
                 learning_curves.append(lc)
                 scores.append(test_score)
 
@@ -412,7 +422,8 @@ def train_dqn_count(
                     "context_history": contexts,
                 }
                 with open(
-                    f"results/dqn_exps/{args.dir}_seed_{args.seed}_intermediate.pl", "wb"
+                    f"results/dqn_exps/{args.dir}_seed_{args.seed}_intermediate.pl",
+                    "wb",
                 ) as file:
                     dill.dump(results, file)
 
@@ -538,9 +549,7 @@ if __name__ == "__main__":
     name_grad = "_grad" + str(args.grad_steps)
     name_mod = f"_{args.mod}"
 
-    group_name = (
-        f"{args.dir}{name_cnn}{name_act}{name_dual}{name_norm}{name_init}{name_alpha}{name_mod}{name_grad}"
-    )
+    group_name = f"{args.dir}{name_cnn}{name_act}{name_dual}{name_norm}{name_init}{name_alpha}{name_mod}{name_grad}"
     save_file_name = f"{group_name}_seed_{args.seed}"
 
     aux_args = Args(
@@ -557,7 +566,7 @@ if __name__ == "__main__":
         use_dual=args.use_dual,
         use_norm=args.use_norm,
         init=args.init,
-        mod=args.mod
+        mod=args.mod,
     )
 
     results, agent = train_dqn_count(
@@ -582,15 +591,16 @@ if __name__ == "__main__":
         f"results/models/{save_file_name}_{args.timesteps}.pt",
     )
 
-    with open(
-        f"results/dqn_exps/{save_file_name}_{args.timesteps}.pl", "wb"
-    ) as file:
+    with open(f"results/dqn_exps/{save_file_name}_{args.timesteps}.pl", "wb") as file:
         dill.dump(results, file)
         file.close()
 
-    
     data = [
-        [results['uniqueness'][-1], np.mean(results['reg_test_scores']), agent.buffer.size]
+        [
+            results["uniqueness"][-1],
+            np.mean(results["reg_test_scores"]),
+            agent.buffer.size,
+        ]
     ]
     headers = ["Uniqueness", "Test Score", "Buffer Size"]
     print(tabulate(data, headers=headers, tablefmt="grid"))

@@ -7,8 +7,8 @@ from tqdm import tqdm
 from copy import deepcopy
 from torch.nn.functional import mse_loss
 
-from rnd_exploration.dataset import ReplayBuffer
-from rnd_exploration.utils import RunningAverage
+from buffers.buffers import ReplayBufferBase
+from utils.statistics import RunningAverage
 from dqn.archs import DQNModule
 from utils.episode import LastEpisode
 from dqn.counter import MovingCountBasedUncertainty
@@ -26,7 +26,7 @@ class DQN:
         use_norm=True,
         capacity: int = int(1e5),
         gamma: float = 0.99,
-        modulation: str = 'concat', 
+        modulation: str = "concat",
         start_epsilon: float = 0.99,
         max_decay: float = 0.1,
         act: nn.Module = nn.ReLU,
@@ -51,7 +51,7 @@ class DQN:
             init_func=init_func,
             hidden_layers=hidden_layers,
             activation_fn=act,
-            modulation=modulation, 
+            modulation=modulation,
         ).to(device)
 
         self.target_net = deepcopy(self.net).to(device)
@@ -64,7 +64,7 @@ class DQN:
         self.epsilon = start_epsilon
         self.use_cnn = use_cnn
 
-        self.buffer = ReplayBuffer(
+        self.buffer = ReplayBufferBase(
             state_dim=env.observation_space.shape,
             capacity=capacity,
             num_actions=env.action_space.n,

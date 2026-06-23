@@ -5,7 +5,7 @@ import torch.nn as nn
 
 from tqdm import tqdm
 
-from rnd_exploration.utils import RunningAverage
+from utils.statistics import RunningAverage
 from rnd_exploration.rnd import RNDNetwork
 from dqn.model import DQN
 

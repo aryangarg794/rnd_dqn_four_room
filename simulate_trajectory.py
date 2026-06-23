@@ -86,12 +86,14 @@ def simulate_trajectory(
             use_dual=False,
             use_norm=True,
             use_action=True,
-            modulation='one_hot',
+            modulation="one_hot",
             device=device,
         )
         agent.load(file_name)
         agent.net.eval()
-        dqn_scores, _, dqn_scores_dirs = record_uvu_scores(agent, random_context, 0, use_cnn=use_cnn)
+        dqn_scores, _, dqn_scores_dirs = record_uvu_scores(
+            agent, random_context, 0, use_cnn=use_cnn
+        )
         dqn_scores = dqn_scores / scale
         dqn_scores_dirs = dqn_scores_dirs / scale
         uvu = True
@@ -104,14 +106,16 @@ def simulate_trajectory(
             use_action=True,
             use_dual=False,
             use_norm=True,
-            modulation='one_hot', 
+            modulation="one_hot",
             hidden_layers=[512, 512, 512],
         )
         agent.net.load_state_dict(
             torch.load(f"results/models/{file_name}.pt", weights_only=True)
         )
         agent.net.eval()
-        dqn_scores, _, dqn_scores_dirs = record_dqn_scores(agent, random_context, 0, use_cnn=use_cnn)
+        dqn_scores, _, dqn_scores_dirs = record_dqn_scores(
+            agent, random_context, 0, use_cnn=use_cnn
+        )
 
     context_info = env.get_wrapper_attr("context_info")(random_context)
     context_info = (*context_info, env.get_wrapper_attr("valid_pos"))

@@ -119,7 +119,7 @@ with wandb.init(
         exploration_fraction=exp_frac,
         seed=0,
         device=device,
-        verbose=1, 
+        verbose=1,
     )
 
     model.learn(total_timesteps=8_000_000, callback=callback, progress_bar=True)

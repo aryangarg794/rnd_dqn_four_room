@@ -13,13 +13,14 @@ from dataclasses import dataclass
 from tqdm import tqdm
 from collections import deque
 
+from buffers.buffers import ReplayBufferBase
 from four_room.env import FourRoomsEnv
 from four_room.utils import obs_to_state
 from four_room.wrappers import gym_wrapper
 from four_room.constants import state_to_q
-from rnd_exploration.utils import RunningAverage
+from utils.statistics import RunningAverage
 from four_room.constants import train_config, val_config, test_config, size
-from rnd_exploration.dataset import State, Transition, ReplayBuffer
+from rnd_exploration.dataset import State, Transition
 from dqn_experiments.regression_exp_utils import run_experiment
 from dqn.model import DQN
 from dqn.counter import CountBasedUncertainty, MovingCountBasedUncertainty
@@ -81,7 +82,7 @@ def train_opt_count(
     )
     counter_full = CountBasedUncertainty(capacity=args.capacity)
 
-    buffer = ReplayBuffer(
+    buffer = ReplayBufferBase(
         args.env.observation_space.shape,
         args.env.action_space.n,
         capacity=args.capacity,
