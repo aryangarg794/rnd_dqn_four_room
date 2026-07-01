@@ -1,2 +1,5 @@
 # action_values/random_dataset.pl filter=lfs diff=lfs merge=lfs -text
 configs/state_to_q.pl filter=lfs diff=lfs merge=lfs -text
+configs/obs_to_q_values_map.pl filter=lfs diff=lfs merge=lfs -text
+configs/train_reachable_space.pl filter=lfs diff=lfs merge=lfs -text
+configs/train_reachable_space_opt_actions.pl filter=lfs diff=lfs merge=lfs -text

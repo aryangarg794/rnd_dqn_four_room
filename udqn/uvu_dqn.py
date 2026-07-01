@@ -12,8 +12,9 @@ import torch.nn.functional as F
 from gymnasium import spaces
 
 from utils.statistics import RunningAverageTorch
-
 from buffers.buffers import UvuGoReplayBuffer
+from udqn.policies import UVUGoPolicy
+
 from stable_baselines3.common.type_aliases import (
     GymEnv,
     RolloutReturn,
@@ -31,6 +32,8 @@ from stable_baselines3.dqn.dqn import DQN
 
 
 class ExploreGoUVU(DQN):
+
+    policy: UVUGoPolicy
 
     def __init__(
         self,
@@ -164,10 +167,11 @@ class ExploreGoUVU(DQN):
     ) -> torch.Tensor:
         actions = action.unsqueeze(dim=1).repeat(1, self.num_heads, 1)
         g_cur = self.g_net(obs).gather(index=actions, dim=-1)  # (b, m, 1)
-        next_act = self.policy(next_obs).max(dim=1)[1].unsqueeze(dim=1)
+        next_act = self.policy._get_policy_acts(next_obs)
         next_act = next_act.unsqueeze(dim=1).repeat(1, self.num_heads, 1)
         g_next = self.g_net(next_obs).gather(index=next_act, dim=-1)
-        return g_cur - self.gamma * g_next * (1 - dones)
+        head_dones = dones.unsqueeze(dim=1).repeat(1, self.num_heads, 1)
+        return g_cur - self.gamma * g_next * (1 - head_dones)
 
     @torch.no_grad()
     def epistemic(self, obs: torch.Tensor, action: torch.Tensor) -> torch.Tensor:
@@ -233,7 +237,7 @@ class ExploreGoUVU(DQN):
 
             if not np.all(self.betas == 0):
                 with torch.no_grad():
-                    if self.uncertainty is not None:
+                    if self.uncertainty != "egreedy":
                         next_obs_shape = replay_data.next_observations.shape
                         actions = (
                             torch.as_tensor(
@@ -245,8 +249,9 @@ class ExploreGoUVU(DQN):
                         next_obs_repeated = torch.repeat_interleave(
                             replay_data.next_observations, self.action_space.n, dim=0
                         )
+
                         novelties = torch.concatenate(
-                            [ir for ir in replay_data.rewards[1:]], dim=-1
+                            [ir for ir in replay_data.rewards[1:]], dim=-1 #NOTE: why use rewards[1:] when its for previous
                         ) * self.uncertainty(
                             next_obs_repeated, actions, global_only=True
                         ).reshape(
@@ -272,7 +277,7 @@ class ExploreGoUVU(DQN):
                                 dim=1
                             )
                     else:
-                        if self.uncertainty is not None:
+                        if self.uncertainty != "egreedy":
                             actions = (
                                 (next_u_values + novelties)
                                 .max(dim=1)[1]
@@ -281,7 +286,7 @@ class ExploreGoUVU(DQN):
                         else:
                             actions = next_u_values.max(dim=1)[1].unsqueeze(dim=1)
 
-                    if self.uncertainty is not None:
+                    if self.uncertainty != "egreedy":
                         next_u_values = (next_u_values + novelties).gather(
                             dim=1, index=actions
                         )
@@ -336,24 +341,23 @@ class ExploreGoUVU(DQN):
                 ).detach()
 
                 # NOTE: right now no option to use double q
-                policy_next_acts = (
-                    self.policy(replay_data.next_observations)
-                    .max(dim=1)[1]
-                    .unsqueeze(dim=1)
-                )
+                policy_next_acts = self.policy._get_policy_acts(replay_data.next_observations)
+                policy_next_acts = policy_next_acts.unsqueeze(dim=1).repeat(1, self.num_heads, 1)
                 target_vals = self.uvu_net_target(replay_data.next_observations).gather(
                     dim=-1, index=policy_next_acts
                 )
+                headed_dones = replay_data.dones.unsqueeze(dim=1).repeat(1, self.num_heads, 1)
                 targets = uvu_rewards + self.gamma * target_vals * (
-                    1 - replay_data.dones
+                    1 - headed_dones
                 )
 
+            headed_actions = replay_data.actions.unsqueeze(dim=1).repeat(1, self.num_heads, 1)
             uvu_values = self.uvu_net(replay_data.observations).gather(
-                dim=-1, index=replay_data.actions
+                dim=-1, index=headed_actions
             )
             loss_heads = F.smooth_l1_loss(uvu_values, targets, reduction="none")
             loss_uvu = loss_heads.squeeze(dim=-1).sum(dim=-1).mean()
-            uvu_losses.append(loss_uvu.item())
+            uvu_losses.append(loss_uvu.item() if self.uvu_gradient_steps > 0 else 0.0)
 
             self.policy.uvu_optimizer.zero_grad()
             loss_uvu.backward()
@@ -651,24 +655,14 @@ class ExploreGoUVU(DQN):
                             next_obs[i, :]
                         )
 
-        # only add the transitions that are recorded
-        obs_to_add = self._last_original_obs[self.record_per_env]
-        next_obs_to_add = next_obs[self.record_per_env]
-        actions_to_add = buffer_action[self.record_per_env]
-        rewards_to_add = reward_[self.record_per_env]
-        dones_to_add = dones[self.record_per_env]
-        infos_to_add = []
-        indices = np.where(self.record_per_env)[0]
-        for idx in indices:
-            infos_to_add.append(infos[idx])
-
         replay_buffer.add(
-            obs_to_add,  # type: ignore[arg-type]
-            next_obs_to_add,  # type: ignore[arg-type]
-            actions_to_add,
-            rewards_to_add,
-            dones_to_add,
-            infos_to_add,
+            self._last_original_obs,  # type: ignore[arg-type]
+            next_obs,  # type: ignore[arg-type]
+            buffer_action,
+            reward_,
+            dones,
+            infos,
+            self.record_per_env
         )
 
         self._last_obs = new_obs

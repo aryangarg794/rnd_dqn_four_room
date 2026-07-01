@@ -1,16 +1,28 @@
-from rnd_exploration.dataset import MovingSet, State, Transition
+from rnd_exploration.dataset import MovingSet, State, Transition, TransitionSA, TransitionSAS
 
 import gymnasium as gym
 import numpy as np
 import torch
 import queue
+import warnings
 
 from hashlib import sha1
 from gymnasium import spaces
 from torch import Tensor
-from typing import Any, Dict, Generator, List, Optional, Tuple, Union
-from stable_baselines3.common.buffers import ReplayBuffer
+from typing import Any, Dict, List, Optional, Union
+from stable_baselines3.common.buffers import ReplayBuffer, BaseBuffer
+from stable_baselines3.common.type_aliases import (
+    ReplayBufferSamples,
+)
+from stable_baselines3.common.vec_env import VecNormalize
 from collections import deque
+
+
+try:
+    # Check memory used by replay buffer when possible
+    import psutil
+except ImportError:
+    psutil = None
 
 
 class ReplayBufferBase:
@@ -293,8 +305,192 @@ class ExploreGoReplayBuffer(ReplayBuffer):
                     infos_list,
                 )
 
+class ReplayBufferCustom(BaseBuffer):
+    """
+    Replay buffer used in off-policy algorithms like SAC/TD3. (Customized ver)
 
-class UvuGoReplayBuffer(ReplayBuffer):
+    :param buffer_size: Max number of element in the buffer
+    :param observation_space: Observation space
+    :param action_space: Action space
+    :param device: PyTorch device
+    :param n_envs: Number of parallel environments
+    :param optimize_memory_usage: Enable a memory efficient variant
+        of the replay buffer which reduces by almost a factor two the memory used,
+        at a cost of more complexity.
+        See https://github.com/DLR-RM/stable-baselines3/issues/37#issuecomment-637501195
+        and https://github.com/DLR-RM/stable-baselines3/pull/28#issuecomment-637559274
+        Cannot be used in combination with handle_timeout_termination.
+    :param handle_timeout_termination: Handle timeout termination (due to timelimit)
+        separately and treat the task as infinite horizon task.
+        https://github.com/DLR-RM/stable-baselines3/issues/284
+    """
+
+    def __init__(
+        self,
+        buffer_size: int,
+        observation_space: spaces.Space,
+        action_space: spaces.Space,
+        device: Union[torch.device, str] = "auto",
+        n_envs: int = 1,
+        optimize_memory_usage: bool = False,
+        handle_timeout_termination: bool = True,
+    ):
+        super().__init__(buffer_size, observation_space, action_space, device, n_envs=n_envs)
+
+        # Adjust buffer size
+        self.buffer_size = buffer_size
+
+        # Check that the replay buffer can fit into the memory
+        if psutil is not None:
+            mem_available = psutil.virtual_memory().available
+
+        # there is a bug if both optimize_memory_usage and handle_timeout_termination are true
+        # see https://github.com/DLR-RM/stable-baselines3/issues/934
+        if optimize_memory_usage and handle_timeout_termination:
+            raise ValueError(
+                "ReplayBuffer does not support optimize_memory_usage = True "
+                "and handle_timeout_termination = True simultaneously."
+            )
+        self.optimize_memory_usage = optimize_memory_usage
+
+        self.observations = np.zeros((self.buffer_size, *self.obs_shape), dtype=observation_space.dtype)
+
+        if optimize_memory_usage:
+            # `observations` contains also the next observation
+            self.next_observations = None
+        else:
+            self.next_observations = np.zeros((self.buffer_size, *self.obs_shape), dtype=observation_space.dtype)
+
+        self.actions = np.zeros(
+            (self.buffer_size, self.action_dim), dtype=self._maybe_cast_dtype(action_space.dtype)
+        )
+
+        self.rewards = np.zeros((self.buffer_size), dtype=np.float32)
+        self.dones = np.zeros((self.buffer_size), dtype=np.float32)
+        # Handle timeouts termination properly if needed
+        # see https://github.com/DLR-RM/stable-baselines3/issues/284
+        self.handle_timeout_termination = handle_timeout_termination
+        self.timeouts = np.zeros((self.buffer_size), dtype=np.float32)
+
+        self.trans = deque(maxlen=buffer_size)
+        self.unique_trans = MovingSet(capacity=buffer_size)
+        self.cur_size = 0
+        self.total_added = 0
+
+        if psutil is not None:
+            total_memory_usage = self.observations.nbytes + self.actions.nbytes + self.rewards.nbytes + self.dones.nbytes
+
+            if self.next_observations is not None:
+                total_memory_usage += self.next_observations.nbytes
+
+            if total_memory_usage > mem_available:
+                # Convert to GB
+                total_memory_usage /= 1e9
+                mem_available /= 1e9
+                warnings.warn(
+                    "This system does not have apparently enough memory to store the complete "
+                    f"replay buffer {total_memory_usage:.2f}GB > {mem_available:.2f}GB"
+                )
+
+    def add(
+        self,
+        obs: np.ndarray,
+        next_obs: np.ndarray,
+        action: np.ndarray,
+        reward: np.ndarray,
+        done: np.ndarray,
+        infos: List[Dict[str, Any]],
+    ) -> None:
+        if isinstance(self.observation_space, spaces.Discrete):
+            obs = obs.reshape((-1, *self.obs_shape))
+            next_obs = next_obs.reshape((-1, *self.obs_shape))
+
+        # Reshape to handle multi-dim and discrete action spaces, see GH #970 #1392
+        action = action.reshape((-1, self.action_dim))
+
+        num_transitions = len(obs)
+        if not self.full:
+            self.cur_size += num_transitions 
+        self.total_added += num_transitions
+        for i in range(num_transitions):
+            self.observations[self.pos] = np.array(obs[i]).copy()
+            self.next_observations[self.pos] = np.array(next_obs[i]).copy()
+            self.actions[self.pos] = np.array(action[i]).copy()
+            self.rewards[self.pos] = np.array(reward[i]).copy()
+            self.dones[self.pos] = np.array(done[i]).copy()
+
+            # add trans
+            trans = TransitionSA(state=np.array(obs[i]).copy(), action=np.array(action[i]).copy())
+            self.trans.append(trans)
+            self.unique_trans.add(trans)
+            
+            current_info = infos[i] if (infos and i < len(infos)) else {}
+            if self.handle_timeout_termination:
+                timeout_flag = current_info.get("TimeLimit.truncated", False)
+                self.timeouts[self.pos] = np.array(timeout_flag)
+
+            self.pos += 1
+            if self.pos == self.buffer_size:
+                self.full = True
+                self.pos = 0
+        
+
+    def sample(self, batch_size: int, env: Optional[VecNormalize] = None) -> ReplayBufferSamples:
+        """
+        Sample elements from the replay buffer.
+        Custom sampling when using memory efficient variant,
+        as we should not sample the element with index `self.pos`
+        See https://github.com/DLR-RM/stable-baselines3/pull/28#issuecomment-637559274
+
+        :param batch_size: Number of element to sample
+        :param env: associated gym VecEnv
+            to normalize the observations/rewards when sampling
+        :return:
+        """
+        if not self.optimize_memory_usage:
+            return super().sample(batch_size=batch_size, env=env)
+        # Do not sample the element with index `self.pos` as the transitions is invalid
+        # (we use only one array to store `obs` and `next_obs`)
+        if self.full:
+            batch_inds = (np.random.randint(1, self.buffer_size, size=batch_size) + self.pos) % self.buffer_size
+        else:
+            batch_inds = np.random.randint(0, self.pos, size=batch_size)
+        return self._get_samples(batch_inds, env=env)
+
+    def _get_samples(self, batch_inds: np.ndarray, env: Optional[VecNormalize] = None) -> ReplayBufferSamples:
+
+        if self.optimize_memory_usage:
+            next_obs = self._normalize_obs(self.observations[(batch_inds + 1) % self.buffer_size, :], env)
+        else:
+            next_obs = self._normalize_obs(self.next_observations[batch_inds, :], env)
+
+        data = (
+            self._normalize_obs(self.observations[batch_inds, :], env),
+            self.actions[batch_inds, :],
+            next_obs,
+            # Only use dones that are not due to timeouts
+            # deactivated by default (timeouts is initialized as an array of False)
+            (self.dones[batch_inds] * (1 - self.timeouts[batch_inds])).reshape(-1, 1),
+            self._normalize_reward(self.rewards[batch_inds].reshape(-1, 1), env),
+        )
+        return ReplayBufferSamples(*tuple(map(self.to_torch, data)))
+
+    @staticmethod
+    def _maybe_cast_dtype(dtype: np.typing.DTypeLike) -> np.typing.DTypeLike:
+        """
+        Cast `np.float64` action datatype to `np.float32`,
+        keep the others dtype unchanged.
+        See GH#1572 for more information.
+
+        :param dtype: The original action space dtype
+        :return: ``np.float32`` if the dtype was float64,
+            the original dtype otherwise.
+        """
+        if dtype == np.float64:
+            return np.float32
+        return dtype
+    
+class UvuGoReplayBuffer(ReplayBufferCustom):
 
     def __init__(
         self,
@@ -344,16 +540,13 @@ class UvuGoReplayBuffer(ReplayBuffer):
         if self.episodic_discount:
             if self.split_uncertainty:
                 self.rewards = np.zeros(
-                    (self.buffer_size, self.n_envs, 1 + self.action_space.n),
+                    (self.buffer_size, 1 + self.action_space.n),
                     dtype=np.float32,
                 )
             else:
                 self.rewards = np.zeros(
-                    (self.buffer_size, self.n_envs, 2), dtype=np.float32
+                    (self.buffer_size, 2), dtype=np.float32
                 )
-
-        self.trans = deque(maxlen=buffer_size)
-        self.unique_trans = MovingSet(capacity=buffer_size)
 
     def add(
         self,
@@ -363,14 +556,9 @@ class UvuGoReplayBuffer(ReplayBuffer):
         reward: np.ndarray,
         done: np.ndarray,
         infos: List[Dict[str, Any]],
+        record_mask: np.ndarray
     ) -> None:
         # add the transitions for uniquneess calc
-        hash_obs = int(sha1(obs.tobytes()).hexdigest(), 16)
-        hash_act = int(sha1(action.tobytes()).hexdigest(), 16)
-        hash_next_obs = int(sha1(next_obs.tobytes()).hexdigest(), 16)
-
-        self.trans.append((hash_obs, hash_act, hash_next_obs))
-        self.unique_trans.add((hash_obs, hash_act, hash_next_obs))
 
         if self.step_count < 500_000:
             normalise = True
@@ -385,12 +573,21 @@ class UvuGoReplayBuffer(ReplayBuffer):
             intrinsic_reward = self.uncertainty(obs_repeated, actions).reshape(obs.shape[0], -1).detach().cpu().numpy()
             reward = np.concatenate([np.expand_dims(reward, axis=-1), intrinsic_reward], axis=1)
 
-        self.skip_add(obs, next_obs, action, reward, done, infos)
-    
-    def skip_add(self, obs, next_obs, action, reward, done, infos):
-        super().add(obs, next_obs, action, reward, done, infos)
-        self.step_count += self.n_envs
 
+         # only add the transitions that are recorded
+        obs_to_add = obs[record_mask]
+        next_obs_to_add = next_obs[record_mask]
+        actions_to_add = action[record_mask]
+        rewards_to_add = reward[record_mask]
+        dones_to_add = done[record_mask]
+        infos_to_add = []
+        indices = np.where(record_mask)[0]
+        for idx in indices:
+            infos_to_add.append(infos[idx])
+            
+        super().add(obs_to_add, next_obs_to_add, actions_to_add, rewards_to_add, dones_to_add, infos_to_add)
+        self.step_count += self.n_envs
+        
     def sample(self, batch_size, env=None):
         if not self.optimize_memory_usage:
             sampled_batch = super().sample(batch_size=batch_size, env=env)

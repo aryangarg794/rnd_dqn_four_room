@@ -54,10 +54,10 @@ class RunningAverageTorch:
 
     @property
     def avg(self):
-        if self.size != 0:
-            return self.values[:self.size].mean(dim=0)
-        else:
+        if self.size < 2:
             return torch.zeros((50,), device=self.device)
+        else:
+            return self.values[:self.size].mean(dim=0)
 
     @property
     def std(self):

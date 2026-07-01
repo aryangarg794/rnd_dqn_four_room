@@ -198,7 +198,7 @@ class UVUGoPolicy(DQNPolicy):
         else:
             uncertainties = self.u_net(obs)
 
-            if self.uncertainty is not None:
+            if self.uncertainty != "egreedy":
                 if len(obs.shape) == 1 or len(obs.shape) == 3:
                     # torchere is no batch dimension
                     no_batch_dim = True
@@ -233,6 +233,17 @@ class UVUGoPolicy(DQNPolicy):
                 else:
                     return q_values + self.betas[0] * uncertainties
 
+    @torch.no_grad()       
+    def _get_policy_acts(
+        self, 
+        obs: torch.Tensor, 
+    ) -> torch.Tensor:
+        u_values = self.u_net(obs)
+        #NOTE assuming beta is the same for all
+        q_vals = self.q_net(obs) + self.betas[0] * u_values
+        actions = q_vals.max(dim=-1)[1].unsqueeze(dim=-1)
+        return actions
+
     def _predict(self, obs: torch.Tensor, deterministic: bool = True) -> torch.Tensor:
         if deterministic:
             # use only Q, not U
@@ -266,7 +277,7 @@ class UVUGoPolicy(DQNPolicy):
                 values = self.q_net(obs_tensor)
             else:
                 uncertainties = self.u_net(obs_tensor)
-                if self.uncertainty is not None:
+                if self.uncertainty != "egreedy":
                     if len(obs_tensor.shape) == 1 or len(obs_tensor.shape) == 3:
                         # torchere is no batch dimension
                         no_batch_dim = True

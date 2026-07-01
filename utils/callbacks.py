@@ -9,7 +9,7 @@ CONFIGS_DIR = "../configs/"
 
 class UniquenesseCallback(BaseCallback):
     def __init__(self, log_freq, verbose=0):
-        super(ExplorationCoverageCallback, self).__init__(verbose)
+        super(UniquenesseCallback, self).__init__(verbose)
         self.log_freq = log_freq
 
     def _on_step(self) -> bool:
@@ -20,9 +20,13 @@ class UniquenesseCallback(BaseCallback):
         ):
             buffer = self.model.replay_buffer
             uniqueness = buffer.uniqueness
+            buffer_size = buffer.cur_size
+            total_added = buffer.total_added
 
         if self.num_timesteps % self.log_freq == 0:
             self.logger.record("train/uniqueness", uniqueness)
+            self.logger.record("train/buffer_size", buffer_size)
+            self.logger.record("train/total_added", total_added)
 
         return True
 

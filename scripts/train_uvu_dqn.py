@@ -5,15 +5,17 @@ from stable_baselines3.common.callbacks import (
     CheckpointCallback
 )
 from udqn.uncertainties import CountSAUncertainty, EpisodicCountSAUncertainty
-from udqn.udqn import ExploreGoUVU
+from udqn.uvu_dqn import ExploreGoUVU
 from udqn.policies import UVUGoPolicy
 from buffers.buffers import UvuGoReplayBuffer
+from utils.callbacks import UniquenesseCallback, BufferCoverageCallback, PolicyOptimalityCallback, ExplorationCoverageCallback
 
 import torch
 import torch.nn.functional as F
 import numpy as np
 import argparse
 import uuid
+import rich
 
 from four_room.arch import *
 
@@ -36,14 +38,14 @@ parser.add_argument(
 parser.add_argument("--exp_frac", type=float, default=0.125)
 parser.add_argument("--gradient_steps", type=int, default=1)
 parser.add_argument("--uvu_gradient_steps", type=int, default=1)
-parser.add_argument("--window_size", type=int, default=2500)
+parser.add_argument("--window_size", type=int, default=1500)
 parser.add_argument("--tau", type=float, default=0.05)
 parser.add_argument("--u_tau", type=float, default=0.005)
 parser.add_argument("--uvu_tau", type=float, default=0.2)
 parser.add_argument("--lr", type=float, default=0.0005)
 parser.add_argument("--u_lr", type=float, default=0.001)
-parser.add_argument("--uvu_lr", type=float, default=0.0001)
-parser.add_argument("--go_vs_uvu", type=float, default=0.05)
+parser.add_argument("--uvu_lr", type=float, default=1e-4)
+parser.add_argument("--go_vs_uvu", type=float, default=0.2)
 parser.add_argument("--arch_size", type=str, default="large")
 parser.add_argument("--max_pure_expl_steps", type=int, default=50)
 parser.add_argument("--e_greedy", action="store_true")
@@ -170,7 +172,7 @@ for seed in args.seeds:
         features_extractor_class=CNN,
         features_extractor_kwargs={
             "features_dim": 512,
-            "init_function": config["initialisation"],
+            "init_function": "kaiming",
         },
         normalize_images=False,
         net_arch=net_arch,
@@ -179,14 +181,14 @@ for seed in args.seeds:
         uvu_kwargs={
             "feature_dims" : 512,
             "net_arch" : [512, 512, 512],
-            "init": config["initialisation"],
+            "init": "kaiming",
             "norm" : True,
             "num_heads" : 512
         },
         g_kwargs={
             "feature_dims" : 512,
             "net_arch" : [512, 512],
-            "init": config["initialisation"],
+            "init": "kaiming",
             "norm" : False,
             "num_heads" : 512
         },
@@ -216,6 +218,9 @@ for seed in args.seeds:
         save_vecnormalize=True,
     )
     callback_list.append(checkpoint_callback)
+
+    unq_callback = UniquenesseCallback(log_freq=5000)
+    callback_list.append(unq_callback)    
 
     # Delete the following lines if you don't want to use wandb for logging results
     import wandb
@@ -249,6 +254,7 @@ for seed in args.seeds:
             gamma=config["gamma"],
             train_freq=(config["train_freq"] // config["n_envs"], "step"),
             gradient_steps=config["gradient_steps"],
+            uvu_gradient_steps=config["uvu_gradient_steps"],
             target_update_interval=config["target_update_interval"],
             exploration_final_eps=config["exploration_final_eps"],
             exploration_fraction=config["exp_frac"],
@@ -262,6 +268,7 @@ for seed in args.seeds:
         )
 
         run_id = f"run_{uuid.uuid4()}_{config['seed']}"
+        rich.print(config)
         model.learn(
             total_timesteps=8_000_000, callback=callback_list, tb_log_name=run_id, progress_bar=True
         )

@@ -63,6 +63,41 @@ class Transition:
         state_hash = int(sha1(self.state.flatten()).hexdigest(), 16)
         q_value_hash = int(sha1(self.q_value.flatten()).hexdigest(), 16)
         return hash((state_hash, q_value_hash))
+    
+class TransitionSA:
+
+    def __init__(self, state: np.ndarray, action: np.ndarray):
+        self.state = state
+        self.action = action
+
+    def __eq__(self, other):
+        return bool(
+            np.all(self.state == other.state) and np.all(self.action == other.action)
+        )
+
+    def __hash__(self):
+        state_hash = int(sha1(self.state.flatten()).hexdigest(), 16)
+        action_hash = int(sha1(self.action.flatten()).hexdigest(), 16)
+        return hash((state_hash, action_hash))
+    
+class TransitionSAS:
+
+    def __init__(self, state: np.ndarray, action: np.ndarray, next_state: np.ndarray):
+        self.state = state
+        self.action = action
+        self.next_state = next_state
+
+    def __eq__(self, other):
+        return bool(
+            np.all(self.state == other.state) and np.all(self.action == other.action)
+            and np.all(self.next_state == other.next_state)
+        )
+
+    def __hash__(self):
+        state_hash = int(sha1(self.state.flatten()).hexdigest(), 16)
+        action_hash = int(sha1(self.action.flatten()).hexdigest(), 16)
+        next_state_hash = int(sha1(self.next_state.flatten()).hexdigest(), 16)
+        return hash((state_hash, action_hash, next_state_hash))
 
 
 class Trajectory:

@@ -188,3 +188,5 @@ bin
 job_scripts
 share/
 /reg_models
+/torch_exp.def
+/logs
