@@ -14,6 +14,7 @@ from stable_baselines3.common.buffers import ReplayBuffer, BaseBuffer
 from stable_baselines3.common.type_aliases import (
     ReplayBufferSamples,
 )
+from stable_baselines3.common.ubuffers import ExploreGoUncertaintyReplayBuffer
 from stable_baselines3.common.vec_env import VecNormalize
 from collections import deque
 
@@ -262,6 +263,9 @@ class ReplayBufferCustom(BaseBuffer):
         self.handle_timeout_termination = handle_timeout_termination
         self.timeouts = np.zeros((self.buffer_size), dtype=np.float32)
 
+        self.trans = deque(maxlen=buffer_size)
+        self.unique_trans = MovingSet(capacity=buffer_size)
+
         self.cur_size = 0
         self.total_added = 0
 
@@ -306,6 +310,10 @@ class ReplayBufferCustom(BaseBuffer):
             self.actions[self.pos] = np.array(action[i]).copy()
             self.rewards[self.pos] = np.array(reward[i]).copy()
             self.dones[self.pos] = np.array(done[i]).copy()
+
+            trans = TransitionSA(state=np.array(obs[i]).copy(), action=np.array(action[i]).copy())
+            self.trans.append(trans)
+            self.unique_trans.add(trans)
             
             current_info = infos[i] if (infos and i < len(infos)) else {}
             if self.handle_timeout_termination:
@@ -521,6 +529,118 @@ class UvuGoReplayBuffer(ReplayBufferCustom):
                 self.uncertainty.observe(sampled_batch.next_observations, update_rms=False)
 
         return sampled_batch
+
+    @property
+    def uniqueness(self):
+        return (
+            self.unique_trans.num_unique / len(self.trans)
+            if len(self.trans) > 0
+            else 0.0
+        )
+
+class ExploreGoBuffer(ExploreGoUncertaintyReplayBuffer):
+
+    def __init__(
+            self, 
+            buffer_size, 
+            observation_space, 
+            action_space, 
+            uncertainty="egreedy", 
+            env=None, 
+            device="cpu", 
+            n_envs=1, 
+            optimize_memory_usage=False, 
+            handle_timeout_termination=True, 
+            state_action_bonus=False, 
+            uncertainty_of_sampling=False, 
+            episodic_discount=False, 
+            split_uncertainty=False, 
+            include_pure_experience=False
+        ):
+        super().__init__(
+            buffer_size, 
+            observation_space, 
+            action_space,
+            uncertainty, 
+            env, 
+            device, 
+            n_envs, 
+            optimize_memory_usage, 
+            handle_timeout_termination, 
+            state_action_bonus, 
+            uncertainty_of_sampling, 
+            episodic_discount, 
+            split_uncertainty, 
+            include_pure_experience
+        )
+
+        self.trans = deque(maxlen=buffer_size)
+        self.unique_trans = MovingSet(capacity=buffer_size)
+        self.cur_size = 0 
+        self.total_added = 0 
+
+    def add(
+        self,
+        obs: np.ndarray,
+        next_obs: np.ndarray,
+        action: np.ndarray,
+        reward: np.ndarray,
+        done: np.ndarray,
+        infos: List[Dict[str, Any]],
+        normal_inds: np.ndarray,
+    ) -> None:
+        if self.step_count < 500_000:
+            normalise = True
+        else:
+            normalise = False
+        if not self.uncertainty == "egreedy":
+            self.uncertainty.observe(obs, action, done, update_rms=normalise)
+
+            actions = torch.as_tensor(range(self.action_space.n), device=self.device).repeat(obs.shape[0]).unsqueeze(1)
+            obs_repeated = torch.repeat_interleave(torch.as_tensor(next_obs, device=self.device), self.action_space.n, dim=0)
+            intrinsic_reward = self.uncertainty(obs_repeated, actions).reshape(obs.shape[0], -1).detach().cpu().numpy()
+            reward = np.concatenate([np.expand_dims(reward, axis=-1), intrinsic_reward], axis=1)
+            
+        if self.include_pure_experience:
+              super().skip_add(obs, next_obs, action, reward, done, infos)
+        else:
+            for i in range(obs.shape[0]):
+                # First add normal (non-pure) experience to the experience queue
+                if normal_inds[i] == True:
+                    experience_tuple = (obs[i], next_obs[i], action[i], reward[i], done[i], infos[i])
+                    self.experience_queue.put(experience_tuple)
+
+            # Add experience to the buffer once enough has been collected
+            if self.experience_queue.qsize() >= self.n_envs:
+                obs_list = []
+                next_obs_list = []
+                action_list = []
+                reward_list = []
+                done_list = []
+                infos_list = []
+                for _ in range(self.n_envs):
+                    experience_tuple = self.experience_queue.get()
+                    obs_list.append(experience_tuple[0])
+                    next_obs_list.append(experience_tuple[1])
+                    action_list.append(experience_tuple[2])
+                    reward_list.append(experience_tuple[3])
+                    done_list.append(experience_tuple[4])
+                    infos_list.append(experience_tuple[5])
+
+                    trans = TransitionSA(state=experience_tuple[0].copy(), action=experience_tuple[2].copy())
+                    self.trans.append(trans)
+                    self.unique_trans.add(trans)
+                if not self.full:
+                    self.cur_size += self.n_envs 
+                self.total_added += self.n_envs
+                    
+                obs_list = np.stack(obs_list, axis=0)
+                next_obs_list = np.stack(next_obs_list, axis=0)
+                action_list = np.stack(action_list, axis=0)
+                reward_list = np.stack(reward_list, axis=0)
+                done_list = np.stack(done_list, axis=0)
+
+                super().skip_add(obs_list, next_obs_list, action_list, reward_list, done_list, infos_list)
 
     @property
     def uniqueness(self):

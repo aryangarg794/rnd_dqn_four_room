@@ -4,7 +4,6 @@ from stable_baselines3.common.env_util import make_vec_env
 from stable_baselines3.common.callbacks import EvalCallback, CheckpointCallback, BaseCallback
 from stable_baselines3.dqn.upolicies import UncertaintyMlpPolicy
 from stable_baselines3.common.uncertainties import CountSAUncertainty, EpisodicCountSAUncertainty
-from stable_baselines3.common.ubuffers import ExploreGoUncertaintyReplayBuffer
 
 import torch as th
 import torch.nn.functional as F
@@ -19,6 +18,7 @@ from utils.callbacks import BufferCoverageCallback, ExplorationCoverageCallback,
 
 import dill
 from four_room.wrappers import gym_wrapper
+from buffers.buffers import ExploreGoBuffer
 
 import gymnasium as gym
 from four_room.env import FourRoomsEnv
@@ -167,7 +167,7 @@ for seed in args.seeds:
     )
     callback_list.append(checkpoint_callback)
 
-    unq_callback = UniquenesseCallback(log_freq=25_000)
+    unq_callback = UniquenesseCallback(log_freq=5_000)
     callback_list.append(unq_callback)    
 
     policy_callback = PolicyOptimalityCallback(100_000, config['num_training_levels'])
@@ -218,7 +218,7 @@ for seed in args.seeds:
             seed=config["seed"],
             device=config["device"],
             max_pure_expl_steps=config["max_pure_expl_steps"],
-            replay_buffer_class=ExploreGoUncertaintyReplayBuffer,
+            replay_buffer_class=ExploreGoBuffer,
             replay_buffer_kwargs=replay_buffer_kwargs,
             double_q=config["double_q"],
             )

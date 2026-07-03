@@ -17,40 +17,23 @@ class UniquenesseCallback(BaseCallback):
         super(UniquenesseCallback, self).__init__(verbose)
         self.log_freq = log_freq
 
-    def _on_training_start(self):
-        self.total_added = 0
-        self.last_buffer_obs = self.model.replay_buffer.observations.reshape(-1, *self.model.observation_space.shape).copy()
-
     def _on_step(self) -> bool:
+        uniqueness = 0.0
+        if (
+            hasattr(self.model, "replay_buffer")
+            and self.model.replay_buffer is not None
+        ):
+            buffer = self.model.replay_buffer
+            uniqueness = buffer.uniqueness
+            buffer_size = buffer.cur_size
+            total_added = buffer.total_added
+
         if self.num_timesteps % self.log_freq == 0:
-            buffer_obs = self.model.replay_buffer.observations.reshape(-1, *self.model.observation_space.shape)
-            buffer_acts = self.model.replay_buffer.actions.reshape(-1, self.model.replay_buffer.action_dim)
-            current_idx = buffer_obs.shape[0] if self.model.replay_buffer.full else self.model.replay_buffer.pos
-
-            unique_trans = MovingSet(capacity=buffer_obs.shape[0])
-
-            for obs, act in zip(buffer_obs[:current_idx], buffer_acts[:current_idx]):
-                trans = TransitionSA(state=obs, action=act)
-                unique_trans.add(trans)
-
-            uniqueness = self.compute_uniqueness(unique_trans, current_idx)
-            num_changed = np.unique((buffer_obs == self.last_buffer_obs).sum(axis=0))[0]
-            self.total_added += num_changed
-            self.last_buffer_obs = buffer_obs.copy()
-
-            
             self.logger.record("train/uniqueness", uniqueness)
-            self.logger.record("train/buffer_size", current_idx)
-            self.logger.record("train/total_added", self.total_added)
+            self.logger.record("train/buffer_size", buffer_size)
+            self.logger.record("train/total_added", total_added)
 
         return True
-    
-    def compute_uniqueness(self, unique_trans: MovingSet, current_size: int):
-        return (
-            unique_trans.num_unique / current_size
-            if current_size > 0
-            else 0.0
-        )
 
 
 class ExplorationCoverageCallback(BaseCallback):
