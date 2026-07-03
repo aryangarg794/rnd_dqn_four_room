@@ -96,7 +96,7 @@ sentry-sdk==2.54.0
 setuptools==82.0.1
 six==1.17.0
 smmap==5.0.3
-stable-baselines3==2.1.0
+git+https://github.com/MWeltevrede/stable-baselines3@2ff271a80b669dfe1091960e5392a5a26b11037f##egg=stable-baselines3
 stack-data==0.6.3
 sympy==1.14.0
 tabulate==0.10.0

@@ -4,7 +4,7 @@ from stable_baselines3.common.callbacks import (
     EvalCallback,
     CheckpointCallback
 )
-from udqn.uncertainties import CountSAUncertainty, EpisodicCountSAUncertainty
+from stable_baselines3.common.uncertainties import CountSAUncertainty, EpisodicCountSAUncertainty
 from udqn.uvu_dqn import ExploreGoUVU
 from udqn.policies import UVUGoPolicy
 from buffers.buffers import UvuGoReplayBuffer
@@ -49,6 +49,7 @@ parser.add_argument("--go_vs_uvu", type=float, default=0.2)
 parser.add_argument("--arch_size", type=str, default="large")
 parser.add_argument("--max_pure_expl_steps", type=int, default=50)
 parser.add_argument("--e_greedy", action="store_true")
+parser.add_argument('--online', action='store_true')
 parser.add_argument("--num_training_levels", type=int, default=200)
 parser.add_argument("--beta", type=float, default=0.01)
 parser.add_argument("--alpha", type=float, default=0.75)
@@ -219,13 +220,24 @@ for seed in args.seeds:
     )
     callback_list.append(checkpoint_callback)
 
-    unq_callback = UniquenesseCallback(log_freq=5000)
+    unq_callback = UniquenesseCallback(log_freq=25_000)
     callback_list.append(unq_callback)    
+
+    policy_callback = PolicyOptimalityCallback(100_000, config['num_training_levels'], device=config['device'])
+    callback_list.append(policy_callback)
+
+    exp_callback = ExplorationCoverageCallback(log_freq=100_000, total_states=(8*8*4+3)*4*args.num_training_levels, num_actions=3)
+    callback_list.append(exp_callback)
+
+    buffer_callback = BufferCoverageCallback(freq=100_000, total_states=(8*8*4+3)*4*args.num_training_levels, num_actions=3)
+    callback_list.append(buffer_callback)
+
 
     # Delete the following lines if you don't want to use wandb for logging results
     import wandb
     from wandb.integration.sb3 import WandbCallback
 
+    wandb_mode = 'online' if args.online else 'offline'
     with wandb.init(
         project="ExploreGo",
         sync_tensorboard=True,  # auto-upload sb3's tensorboard metrics

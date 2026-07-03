@@ -81,5 +81,14 @@ with open("configs/validation_unreachable.pl", "rb") as file:
 with open("configs/state_to_q.pl", "rb") as file:
     state_to_q = dill.load(file)
 
+with open("configs/train_reachable_space.pl", "rb") as file:
+    train_reachable_space = dill.load(file)
+
+with open("configs/train_reachable_space_opt_actions.pl", "rb") as file:
+    train_reachable_space_opt_actions = dill.load(file)
+
+with open("configs/obs_to_q_values_map.pl", "rb") as file:
+    obs_to_q_values_map = dill.load(file)
+
 state_to_q_np = np.load("configs/state_to_q_np.npy")
 size = 19
