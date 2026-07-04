@@ -162,12 +162,13 @@ class ExploreGoUVU(DQN):
         self,
         obs: torch.Tensor,
         action: torch.Tensor,
+        rewards: torch.Tensor, 
         next_obs: torch.Tensor,
         dones: torch.Tensor,
     ) -> torch.Tensor:
         actions = action.unsqueeze(dim=1).repeat(1, self.num_heads, 1)
         g_cur = self.g_net(obs).gather(index=actions, dim=-1)  # (b, m, 1)
-        next_act = self.policy._get_policy_acts(next_obs)
+        next_act = self.policy._get_policy_acts(next_obs, rewards)
         next_act = next_act.unsqueeze(dim=1).repeat(1, self.num_heads, 1)
         g_next = self.g_net(next_obs).gather(index=next_act, dim=-1)
         head_dones = dones.unsqueeze(dim=1).repeat(1, self.num_heads, 1)
@@ -210,11 +211,11 @@ class ExploreGoUVU(DQN):
                     actions = next_q_values.max(dim=1)[1].unsqueeze(dim=1)
                     next_q_values = next_q_values.gather(dim=1, index=actions)
 
-                    # 1-step TD target
-                    target_q_values = (
-                        replay_data.rewards[0]
-                        + (1 - replay_data.dones) * self.gamma * next_q_values
-                    )
+                # 1-step TD target
+                target_q_values = (
+                    replay_data.rewards[0]
+                    + (1 - replay_data.dones) * self.gamma * next_q_values
+                )
 
             # Get current Q-values estimates
             current_q_values = self.q_net(replay_data.observations)
@@ -251,7 +252,7 @@ class ExploreGoUVU(DQN):
                         )
 
                         novelties = torch.concatenate(
-                            [ir for ir in replay_data.rewards[1:]], dim=-1 #NOTE: why use rewards[1:] when its for previous
+                            [ir for ir in replay_data.rewards[1:1+self.action_space.n]], dim=-1 
                         ) * self.uncertainty(
                             next_obs_repeated, actions, global_only=True
                         ).reshape(
@@ -336,12 +337,13 @@ class ExploreGoUVU(DQN):
                 uvu_rewards = self.uvu_reward(
                     replay_data.observations,
                     replay_data.actions,
+                    replay_data.rewards,
                     replay_data.next_observations,
                     replay_data.dones,
                 ).detach()
 
                 # NOTE: right now no option to use double q
-                policy_next_acts = self.policy._get_policy_acts(replay_data.next_observations)
+                policy_next_acts = self.policy._get_policy_acts(replay_data.next_observations, replay_data.rewards)
                 policy_next_acts = policy_next_acts.unsqueeze(dim=1).repeat(1, self.num_heads, 1)
                 target_vals = self.uvu_net_target(replay_data.next_observations).gather(
                     dim=-1, index=policy_next_acts
@@ -525,17 +527,18 @@ class ExploreGoUVU(DQN):
                 observation, _ = self.policy.obs_to_tensor(self._last_obs)
                 policy_acts = self.policy(observation).max(dim=1)[1].unsqueeze(dim=1)
                 uvu_vals = self.epistemic(observation, policy_acts)
-                new_record = self.running_means.check(self.alpha, uvu_vals)
-
+                threshold_passed = self.running_means.check(self.alpha, uvu_vals)
                 self.running_means.update(uvu_vals)
+
                 if self.num_timesteps < learning_starts:
                     new_record = np.ones((env.num_envs,), dtype=bool)
                 else:
-                    new_record[self.mode_per_env] = (
-                        self.episode_steps >= self.num_pure_expl_steps
-                    )[self.mode_per_env]
+                    new_record = threshold_passed.copy()
+                    step_condition = self.episode_steps >= self.num_pure_expl_steps
+                    new_record[self.mode_per_env] = step_condition[self.mode_per_env]
 
-                self.record_per_env = self.record_per_env | new_record
+            just_turned_true = new_record & ~self.record_per_env
+            self.record_per_env = self.record_per_env | new_record
 
             # Select action randomly or according to policy
             actions, buffer_actions = self._sample_action(
@@ -548,7 +551,7 @@ class ExploreGoUVU(DQN):
             # If the last step of the pure exploration phase, set done to True
             buffer_dones = deepcopy(dones)
             if self.replay_buffer.include_pure_experience == False:
-                last_pure_indices = self.episode_steps == (self.num_pure_expl_steps - 1)
+                last_pure_indices = just_turned_true
                 buffer_dones[last_pure_indices] = np.array(
                     [True for _ in range(last_pure_indices.sum())]
                 )

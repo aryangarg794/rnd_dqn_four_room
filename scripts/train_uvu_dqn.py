@@ -9,6 +9,7 @@ from udqn.uvu_dqn import ExploreGoUVU
 from udqn.policies import UVUGoPolicy
 from buffers.buffers import UvuGoReplayBuffer
 from utils.callbacks import UniquenesseCallback, BufferCoverageCallback, PolicyOptimalityCallback, ExplorationCoverageCallback
+from utils.statistics import human_format
 
 import torch
 import torch.nn.functional as F
@@ -35,6 +36,8 @@ parser.add_argument(
     default=0,
     help="Provide the seeds for the agents to be trained",
 )
+parser.add_argument("--dir", type=str, default='uvugo')
+parser.add_argument("--timesteps", type=int, default=8_000_000)
 parser.add_argument("--exp_frac", type=float, default=0.125)
 parser.add_argument("--gradient_steps", type=int, default=1)
 parser.add_argument("--uvu_gradient_steps", type=int, default=1)
@@ -220,7 +223,7 @@ for seed in args.seeds:
     )
     callback_list.append(checkpoint_callback)
 
-    unq_callback = UniquenesseCallback(log_freq=25_000)
+    unq_callback = UniquenesseCallback(log_freq=5_000)
     callback_list.append(unq_callback)    
 
     policy_callback = PolicyOptimalityCallback(100_000, config['num_training_levels'], device=config['device'])
@@ -238,8 +241,12 @@ for seed in args.seeds:
     from wandb.integration.sb3 import WandbCallback
 
     wandb_mode = 'online' if args.online else 'offline'
+    time_name = human_format(args.timesteps)
+    run_name = f"{args.dir}_{time_name}"
     with wandb.init(
         project="ExploreGo",
+        name=f"seed_{seed}",
+        group=run_name,
         sync_tensorboard=True,  # auto-upload sb3's tensorboard metrics
         tags=["FourRooms", "UVU"],
         config=config,
@@ -282,7 +289,7 @@ for seed in args.seeds:
         run_id = f"run_{uuid.uuid4()}_{config['seed']}"
         rich.print(config)
         model.learn(
-            total_timesteps=8_000_000, callback=callback_list, tb_log_name=run_id, progress_bar=True
+            total_timesteps=args.timesteps, callback=callback_list, tb_log_name=run_id, progress_bar=True
         )
         train_env.close()
         eval_env.close()

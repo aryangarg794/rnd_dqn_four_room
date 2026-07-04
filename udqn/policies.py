@@ -237,10 +237,34 @@ class UVUGoPolicy(DQNPolicy):
     def _get_policy_acts(
         self, 
         obs: torch.Tensor, 
+        rewards: torch.Tensor
     ) -> torch.Tensor:
+        # NOTE: assuming that the obs passed is always the next_obs since i_rewards are part of the next obs
         u_values = self.u_net(obs)
-        #NOTE assuming beta is the same for all
-        q_vals = self.q_net(obs) + self.betas[0] * u_values
+        # if next_obs:
+        #     section = slice(1+self.action_space.n, 1+2*self.action_space.n)
+        # else:
+        #     section = slice(1, 1+self.action_space.n)
+        obs_shape = obs.shape
+        actions = (
+            torch.as_tensor(
+                range(self.action_space.n), device=self.device
+            )
+            .repeat(obs_shape[0])
+            .unsqueeze(1)
+        )
+        obs_repeated = torch.repeat_interleave(
+            obs, self.action_space.n, dim=0
+        )
+
+        novelties = novelties = torch.concatenate(
+            [ir for ir in rewards[1:]], dim=-1 
+        ) * self.uncertainty(
+            obs_repeated, actions, global_only=True
+        ).reshape(
+            obs_shape[0], -1
+        )
+        q_vals = self.q_net(obs) + self.betas[0] * (u_values + novelties)
         actions = q_vals.max(dim=-1)[1].unsqueeze(dim=-1)
         return actions
 

@@ -14,7 +14,7 @@ import uuid
 from four_room.arch import *
 from four_room.constants import train_config, val_config, train_reachable_space, train_reachable_space_opt_actions, obs_to_q_values_map
 from utils.callbacks import BufferCoverageCallback, ExplorationCoverageCallback, PolicyOptimalityCallback, UniquenesseCallback
-
+from utils.statistics import human_format
 
 import dill
 from four_room.wrappers import gym_wrapper
@@ -24,6 +24,8 @@ import gymnasium as gym
 from four_room.env import FourRoomsEnv
 
 parser = argparse.ArgumentParser()
+parser.add_argument("--dir", type=str, default='explorego')
+parser.add_argument("--timesteps", type=int, default=8_000_000)
 parser.add_argument("--seeds", nargs='+', type=int, default=0, help="Provide the seeds for the agents to be trained")
 parser.add_argument("--exp_frac", type=float, default=0.125)
 parser.add_argument("--gradient_steps", type=int, default=1)
@@ -186,13 +188,17 @@ for seed in args.seeds:
     from wandb.integration.sb3 import WandbCallback
     
     wandb_mode = 'online' if args.online else 'offline'
+    time_name = human_format(args.timesteps)
+    run_name = f"{args.dir}_{time_name}"
     with wandb.init(
             project="ExploreGo",
+            group=run_name,
+            name=f"seed_{seed}",
             sync_tensorboard=True,  # auto-upload sb3's tensorboard metrics
             tags=["FourRooms", "DQN"],
             config=config,
             mode=wandb_mode
-            ):
+        ):
         wandb_callback = WandbCallback()
 
         model = UncertaintyDQN(
@@ -224,6 +230,6 @@ for seed in args.seeds:
             )
 
         run_id = f"run_{uuid.uuid4()}_{config['seed']}"
-        model.learn(total_timesteps=8_000_000, callback=callback_list, tb_log_name=run_id, progress_bar=True)
+        model.learn(total_timesteps=args.timesteps, callback=callback_list, tb_log_name=run_id, progress_bar=True)
         train_env.close()
         eval_env.close()

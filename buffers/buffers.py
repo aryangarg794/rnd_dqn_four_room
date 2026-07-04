@@ -421,6 +421,8 @@ class UvuGoReplayBuffer(ReplayBufferCustom):
         self.episodic_discount = episodic_discount
         self.split_uncertainty = split_uncertainty
         self.include_pure_experience = include_pure_experience
+        self.reward_shape = 1 + self.action_space.n
+
         assert not (
             self.episodic_discount and self.uncertainty_of_sampling
         ), "Episodic sampling and uncertainty of buffer sampling is not supported."
@@ -431,7 +433,7 @@ class UvuGoReplayBuffer(ReplayBufferCustom):
         if self.episodic_discount:
             if self.split_uncertainty:
                 self.rewards = np.zeros(
-                    (self.buffer_size, 1 + self.action_space.n),
+                    (self.buffer_size, self.reward_shape),
                     dtype=np.float32,
                 )
             else:
@@ -460,9 +462,11 @@ class UvuGoReplayBuffer(ReplayBufferCustom):
             self.uncertainty.observe(obs, action, done, update_rms=normalise)
 
             actions = torch.as_tensor(range(self.action_space.n), device=self.device).repeat(obs.shape[0]).unsqueeze(1)
-            obs_repeated = torch.repeat_interleave(torch.as_tensor(next_obs, device=self.device), self.action_space.n, dim=0)
-            intrinsic_reward = self.uncertainty(obs_repeated, actions).reshape(obs.shape[0], -1).detach().cpu().numpy()
-            reward = np.concatenate([np.expand_dims(reward, axis=-1), intrinsic_reward], axis=1)
+            next_obs_repeated = torch.repeat_interleave(torch.as_tensor(next_obs, device=self.device), self.action_space.n, dim=0)
+            # obs_repeated = torch.repeat_interleave(torch.as_tensor(obs, device=self.device), self.action_space.n, dim=0)
+            next_intrinsic_reward = self.uncertainty(next_obs_repeated, actions).reshape(obs.shape[0], -1).detach().cpu().numpy()
+            # intrinsic_reward = self.uncertainty(obs_repeated, actions).reshape(obs.shape[0], -1).detach().cpu().numpy()
+            reward = np.concatenate([np.expand_dims(reward, axis=-1), next_intrinsic_reward], axis=1)
 
 
          # only add the transitions that are recorded
@@ -498,9 +502,9 @@ class UvuGoReplayBuffer(ReplayBufferCustom):
                     if self.episodic_discount:
                         if self.split_uncertainty:
                             intrinsic_rewards = []
-                            for i in range(self.action_space.n):
-                                intrinsic_rewards.append(sampled_batch.rewards.reshape(-1, 1 + self.action_space.n)[:, 1+i].unsqueeze(-1))
-                            real_rewards = sampled_batch.rewards.reshape(-1, 1 + self.action_space.n)[:, 0].unsqueeze(-1)
+                            for i in range(self.reward_shape - 1):
+                                intrinsic_rewards.append(sampled_batch.rewards.reshape(-1, self.reward_shape)[:, 1+i].unsqueeze(-1))
+                            real_rewards = sampled_batch.rewards.reshape(-1, self.reward_shape)[:, 0].unsqueeze(-1)
                         else:
                             intrinsic_rewards = sampled_batch.rewards.reshape(-1, 2)[:, 1].unsqueeze(-1)
                             intrinsic_rewards = intrinsic_rewards * self.uncertainty(sampled_batch.observations, sampled_batch.actions, global_only=True).unsqueeze(-1)
@@ -630,6 +634,7 @@ class ExploreGoBuffer(ExploreGoUncertaintyReplayBuffer):
                     trans = TransitionSA(state=experience_tuple[0].copy(), action=experience_tuple[2].copy())
                     self.trans.append(trans)
                     self.unique_trans.add(trans)
+
                 if not self.full:
                     self.cur_size += self.n_envs 
                 self.total_added += self.n_envs

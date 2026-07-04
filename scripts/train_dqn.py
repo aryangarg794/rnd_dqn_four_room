@@ -13,6 +13,7 @@ import gymnasium as gym
 from four_room.env import FourRoomsEnv
 from four_room.constants import train_config
 from four_room.wrappers import gym_wrapper_state
+from utils.statistics import human_format
 
 import argparse
 import matplotlib.pyplot as plt
@@ -21,19 +22,6 @@ from copy import deepcopy
 gym.register("MiniGrid-FourRooms-v1", FourRoomsEnv)
 
 from stable_baselines3.common.callbacks import CallbackList
-
-
-def human_format(num):
-    num = float("{:.3g}".format(num))
-    magnitude = 0
-    while abs(num) >= 1000:
-        magnitude += 1
-        num /= 1000.0
-
-    suffixes = ["", "k", "M", "B", "T"]
-    return "{}{}".format(
-        "{:f}".format(num).rstrip("0").rstrip("."), suffixes[magnitude]
-    )
 
 
 num_train_configs = len(train_config["topologies"])
