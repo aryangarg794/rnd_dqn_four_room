@@ -250,6 +250,7 @@ for seed in args.seeds:
         sync_tensorboard=True,  # auto-upload sb3's tensorboard metrics
         tags=["FourRooms", "UVU"],
         config=config,
+        mode=wandb_mode
     ):
         wandb_callback = WandbCallback()
 

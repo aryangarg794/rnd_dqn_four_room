@@ -172,7 +172,7 @@ for seed in args.seeds:
     unq_callback = UniquenesseCallback(log_freq=5_000)
     callback_list.append(unq_callback)    
 
-    policy_callback = PolicyOptimalityCallback(100_000, config['num_training_levels'])
+    policy_callback = PolicyOptimalityCallback(100_000, config['num_training_levels'], device=config['device'])
     callback_list.append(policy_callback)
 
     exp_callback = ExplorationCoverageCallback(log_freq=100_000, total_states=(8*8*4+3)*4*args.num_training_levels, num_actions=3)
