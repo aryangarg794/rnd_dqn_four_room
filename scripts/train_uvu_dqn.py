@@ -211,14 +211,14 @@ for seed in args.seeds:
     callback_list = [callback]
 
     save_path = (
-        LOGS_DIR
-        + f"UVU/{args.beta}_{args.max_pure_expl_steps}_{args.alpha}_{config['seed']}/"
+        CKPT_DIR
+        + f"{args.dir}_seed{seed}"
     )
         
     checkpoint_callback = CheckpointCallback(
         save_freq=max(4_000_000 // config["n_envs"], 1),
         save_path=save_path,
-        name_prefix="uvu",
+        name_prefix="rl_model",
         save_replay_buffer=False,
         save_vecnormalize=True,
     )

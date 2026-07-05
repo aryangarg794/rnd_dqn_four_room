@@ -47,6 +47,7 @@ parser.add_argument('--small_rnd', action='store_true')
 args = parser.parse_args()
 
 LOGS_DIR = 'logs/'
+CKPT_DIR = "checkpoints/"
 
 gym.register('MiniGrid-FourRooms-v1', FourRoomsEnv)
 
@@ -156,10 +157,7 @@ for seed in args.seeds:
     callback = EvalCallback(eval_env, n_eval_episodes=len(val_config['topologies']), eval_freq=max(100_000 // config["n_envs"], 1), verbose=0)
     callback_list = [callback]
 
-    if args.include_pure_experience:
-        save_path = LOGS_DIR + f"DQN/{args.include_pure_experience}_{args.max_pure_expl_steps}_{args.lam}_{args.alpha}_{config['seed']}/"
-    else:
-        save_path = LOGS_DIR + f"DQN/{args.beta}_{args.max_pure_expl_steps}_{args.lam}_{args.alpha}_{config['seed']}/"
+    save_path = CKPT_DIR + f"{args.dir}_seed{seed}"
     checkpoint_callback = CheckpointCallback(
         save_freq=max(4_000_000 // config["n_envs"], 1),
         save_path=save_path,
