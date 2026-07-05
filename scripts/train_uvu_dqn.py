@@ -60,6 +60,7 @@ parser.add_argument("--alpha", type=float, default=0.75)
 args = parser.parse_args()
 
 LOGS_DIR = "logs/"
+CKPT_DIR = "checkpoints/"
 
 
 num_train_configs = len(train_config["topologies"])

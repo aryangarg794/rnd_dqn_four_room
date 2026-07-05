@@ -79,39 +79,29 @@ class BufferCoverageCallback(BaseCallback):
                 state_action_count[hash(obs.data.tobytes())] = dict()
 
             if self.model.replay_buffer.full:
-                for i, obs_stack in enumerate(self.model.replay_buffer.observations):
-                    for j, obs in enumerate(obs_stack):
-                        obs_hash = hash(obs.data.tobytes())
-                        action_hash = self.model.replay_buffer.actions[
-                            i, j
-                        ].data.tobytes()
-                        if obs_hash in state_action_count:
-                            # if this is not the case this is because it is a terminal state which is just in the buffer for bootstrapping reasons
-                            if action_hash in state_action_count[obs_hash]:
-                                state_action_count[obs_hash][action_hash] += 1
-                            else:
-                                state_action_count[obs_hash][action_hash] = 1
-                        else:
-                            print(obs[0] == obs[-1])
+                obs_slice = self.model.replay_buffer.observations
+                act_slice = self.model.replay_buffer.actions
+            else: 
+                obs_slice = self.model.replay_buffer.observations[:self.model.replay_buffer.pos]
+                act_slice = self.model.replay_buffer.actions[:self.model.replay_buffer.pos]
+
+            if obs_slice.ndim > 2 and obs_slice.shape[1] == self.model.n_envs:
+                flat_obs = obs_slice.reshape(-1, *obs_slice.shape[2:])
+                flat_act = act_slice.reshape(-1, *act_slice.shape[2:])
             else:
-                for i, obs_stack in enumerate(
-                    self.model.replay_buffer.observations[
-                        : self.model.replay_buffer.pos
-                    ]
-                ):
-                    for j, obs in enumerate(obs_stack):
-                        obs_hash = hash(obs.data.tobytes())
-                        action_hash = self.model.replay_buffer.actions[
-                            i, j
-                        ].data.tobytes()
-                        if obs_hash in state_action_count:
-                            # if this is not the case this is because it is a terminal state which is just in the buffer for bootstrapping reasons
-                            if action_hash in state_action_count[obs_hash]:
-                                state_action_count[obs_hash][action_hash] += 1
-                            else:
-                                state_action_count[obs_hash][action_hash] = 1
-                        else:
-                            print(obs[0] == obs[-1])
+                flat_obs = obs_slice.reshape(-1, *obs_slice.shape[1:])
+                flat_act = act_slice.reshape(-1, *act_slice.shape[1:])
+
+            for obs, act in zip(flat_obs, flat_act):
+                obs_hash = hash(obs.data.tobytes())
+                if obs_hash in state_action_count:
+                    action_hash = act.data.tobytes()
+                    if action_hash in state_action_count[obs_hash]:
+                        state_action_count[obs_hash][action_hash] += 1
+                    else:
+                        state_action_count[obs_hash][action_hash] = 1
+                else:
+                    print(obs[0] == obs[-1])
 
             zero_count = 0
             state_actions_missing = 0
